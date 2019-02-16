@@ -1,4 +1,4 @@
-debug ?= yes
+debug ?= no
 static ?= no
 gzip_man ?= yes
 
@@ -18,6 +18,21 @@ else
     else
         $(error debug should be either yes or no)
     endif
+endif
+
+ifneq (,$(findstring address,$(sanitize)))
+    CPPFLAGS += -fsanitize=address
+    LDFLAGS += -lasan
+    sanitize_suffix := $(sanitize_suffix)a
+endif
+ifneq (,$(findstring undefined,$(sanitize)))
+    CPPFLAGS += -fsanitize=undefined
+    LDFLAGS += -lubsan
+    sanitize_suffix := $(sanitize_suffix)u
+endif
+
+ifneq (,$(sanitize_suffix))
+    suffix := $(suffix).san_$(sanitize_suffix)
 endif
 
 version ?= $(shell if [ -f .version ]; then cat .version; elif  [ -d ../.git ]; then git describe --tags HEAD; else echo "unknown"; fi)
@@ -70,7 +85,7 @@ else
     LDFLAGS += -rdynamic
 endif
 
-CXXFLAGS += -pedantic -std=gnu++14 -g -Wall -Wextra -Wno-unused-parameter -Wno-reorder -Wno-sign-compare -Wno-address -Wno-noexcept-type -Wno-unknown-attributes -Wno-unknown-warning-option
+CXXFLAGS += -pedantic -std=c++17 -g -Wall -Wextra -Wno-unused-parameter -Wno-reorder -Wno-sign-compare -Wno-address -Wno-noexcept-type -Wno-unknown-attributes -Wno-unknown-warning-option
 
 all : kak
 
@@ -94,18 +109,15 @@ kak$(suffix) : $(objects) .version.o
 
 # Generate the man page
 ifeq ($(gzip_man),yes)
-../doc/kak.1.gz: ../doc/kak.1.asciidoc
-	a2x --no-xmllint -f manpage $<
-	gzip -n -9 -f $(basename $<)
+../doc/kak.1.gz: ../doc/kak.1
+	gzip -n -9 -f -k $<
 man: ../doc/kak.1.gz
 else
-../doc/kak.1: ../doc/kak.1.asciidoc
-	a2x --no-xmllint -f manpage $<
 man: ../doc/kak.1
 endif
 
 check: test
-test:
+test: kak
 	cd ../test && ./run
 
 TAGS: tags

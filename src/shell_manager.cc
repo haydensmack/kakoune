@@ -19,6 +19,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstdlib>
+#include <errno.h>
+
+#if defined(__CYGWIN__)
+#define vfork fork
+#endif
 
 extern char **environ;
 
@@ -28,22 +33,32 @@ namespace Kakoune
 ShellManager::ShellManager(ConstArrayView<EnvVarDesc> builtin_env_vars)
     : m_env_vars{builtin_env_vars}
 {
-    // Get a guaranteed to be POSIX shell binary
+    auto is_executable = [](StringView path) {
+        struct stat st;
+        if (stat(path.zstr(), &st))
+            return false;
+
+        bool executable = (st.st_mode & S_IXUSR)
+                        | (st.st_mode & S_IXGRP)
+                        | (st.st_mode & S_IXOTH);
+        return S_ISREG(st.st_mode) and executable;
+    };
+
+    if (const char* shell = getenv("KAKOUNE_POSIX_SHELL"))
+    {
+        if (not is_executable(shell))
+            throw runtime_error{format("KAKOUNE_POSIX_SHELL '{}' is not executable", shell)};
+        m_shell = shell;
+    }
+    else // Get a guaranteed to be POSIX shell binary
     {
         auto size = confstr(_CS_PATH, nullptr, 0);
         String path; path.resize(size-1, 0);
         confstr(_CS_PATH, path.data(), size);
         for (auto dir : StringView{path} | split<StringView>(':'))
         {
-            String candidate = format("{}/sh", dir);
-            struct stat st;
-            if (stat(candidate.c_str(), &st))
-                continue;
-
-            bool executable = (st.st_mode & S_IXUSR)
-                            | (st.st_mode & S_IXGRP)
-                            | (st.st_mode & S_IXOTH);
-            if (S_ISREG(st.st_mode) and executable)
+            auto candidate = format("{}/sh", dir);
+            if (is_executable(candidate))
             {
                 m_shell = std::move(candidate);
                 break;
@@ -100,20 +115,20 @@ pid_t spawn_shell(const char* shell, StringView cmdline,
     envptrs.push_back(nullptr);
 
     auto cmdlinezstr = cmdline.zstr();
-    Vector<const char*> execparams = { shell, "-c", cmdlinezstr };
+    Vector<const char*> execparams = { "sh", "-c", cmdlinezstr };
     if (not params.empty())
         execparams.push_back(shell);
     for (auto& param : params)
         execparams.push_back(param.c_str());
     execparams.push_back(nullptr);
 
-    if (pid_t pid = fork())
+    if (pid_t pid = vfork())
         return pid;
 
     setup_child();
 
     execve(shell, (char* const*)execparams.data(), (char* const*)envptrs.data());
-    exit(-1);
+    _exit(-1);
     return -1;
 }
 
@@ -122,10 +137,9 @@ Vector<String> generate_env(StringView cmdline, const Context& context, const Sh
     static const Regex re(R"(\bkak_(\w+)\b)");
 
     Vector<String> kak_env;
-    for (RegexIterator<const char*> it{cmdline.begin(), cmdline.end(), re}, end;
-         it != end; ++it)
+    for (auto&& match : RegexIterator{cmdline.begin(), cmdline.end(), re})
     {
-        StringView name{(*it)[1].first, (*it)[1].second};
+        StringView name{match[1].first, match[1].second};
 
         auto match_name = [&](const String& s) {
             return s.substr(0_byte, name.length()) == name and
@@ -167,7 +181,6 @@ std::pair<String, int> ShellManager::eval(
     Pipe child_stdin{not input.empty()}, child_stdout, child_stderr;
     pid_t pid = spawn_shell(m_shell.c_str(), cmdline, shell_context.params, kak_env,
                             [&child_stdin, &child_stdout, &child_stderr] {
-        set_signal_handler(SIGPIPE, SIG_DFL);
         auto move = [](int oldfd, int newfd)
         {
             if (oldfd == newfd)

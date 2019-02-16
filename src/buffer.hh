@@ -61,7 +61,7 @@ public:
     // costly, so this is not strictly random access
     using iterator_category = std::bidirectional_iterator_tag;
 
-    BufferIterator() noexcept : m_buffer(nullptr) {}
+    BufferIterator() noexcept : m_buffer{nullptr}, m_line{} {}
     BufferIterator(const Buffer& buffer, BufferCoord coord) noexcept;
 
     bool operator== (const BufferIterator& iterator) const noexcept;
@@ -70,6 +70,9 @@ public:
     bool operator<= (const BufferIterator& iterator) const noexcept;
     bool operator>  (const BufferIterator& iterator) const noexcept;
     bool operator>= (const BufferIterator& iterator) const noexcept;
+
+    bool operator== (const BufferCoord& coord) const noexcept;
+    bool operator!= (const BufferCoord& coord) const noexcept;
 
     const char& operator* () const noexcept;
     const char& operator[](size_t n) const noexcept;
@@ -88,11 +91,12 @@ public:
     BufferIterator operator-- (int);
 
     const BufferCoord& coord() const noexcept { return m_coord; }
+    explicit operator BufferCoord() const noexcept { return m_coord; }
+    using Sentinel = BufferCoord;
 
 private:
     SafePtr<const Buffer> m_buffer;
     BufferCoord m_coord;
-    LineCount m_line_count;
     StringView m_line;
 };
 
@@ -199,7 +203,7 @@ public:
 
     ValueMap& values() const { return m_values; }
 
-    void run_hook_in_own_context(StringView hook_name, StringView param,
+    void run_hook_in_own_context(Hook hook, StringView param,
                                  String client_name = {});
 
     void reload(StringView data, timespec fs_timestamp = InvalidTime);

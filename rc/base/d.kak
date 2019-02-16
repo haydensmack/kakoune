@@ -116,19 +116,17 @@ define-command -hidden d-indent-on-closing-curly-brace %[
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group d-highlight global WinSetOption filetype=d %{ add-highlighter window/d ref d }
+hook -group d-highlight global WinSetOption filetype=d %{
+    add-highlighter window/d ref d
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/d }
+}
 
 hook global WinSetOption filetype=d %{
     # cleanup trailing whitespaces when exiting insert mode
-    hook window ModeChange insert:.* -group d-hooks %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
+    hook window ModeChange insert:.* -group d-trim-indent %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
     hook window InsertChar \n -group d-indent d-indent-on-new-line
     hook window InsertChar \{ -group d-indent d-indent-on-opening-curly-brace
     hook window InsertChar \} -group d-indent d-indent-on-closing-curly-brace
-}
 
-hook -group d-highlight global WinSetOption filetype=(?!d).* %{ remove-highlighter window/d }
-
-hook global WinSetOption filetype=(?!d).* %{
-    remove-hooks window d-hooks
-    remove-hooks window d-indent
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window d-.+ }
 }

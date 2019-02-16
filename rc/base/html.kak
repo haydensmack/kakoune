@@ -32,7 +32,7 @@ add-highlighter shared/html/tag/base/ regex <(!DOCTYPE(\h+\w+)+) 1:meta
 # Commands
 # ‾‾‾‾‾‾‾‾
 
-define-command -hidden html-filter-around-selections %{
+define-command -hidden html-trim-indent %{
     # remove trailing white spaces
     try %{ execute-keys -draft -itersel <a-x> s \h+$ <ret> d }
 }
@@ -49,26 +49,27 @@ define-command -hidden html-indent-on-new-line %{
         # preserve previous line indent
         try %{ execute-keys -draft \; K <a-&> }
         # filter previous line
-        try %{ execute-keys -draft k : html-filter-around-selections <ret> }
+        try %{ execute-keys -draft k : html-trim-indent <ret> }
         # indent after lines ending with opening tag
-        try %{ execute-keys -draft k <a-x> <a-k> <[^/][^>]+>$ <ret> j <a-gt> }
-    }
+        try %{ execute-keys -draft k <a-x> <a-k> <lt>(?!area)(?!base)(?!br)(?!col)(?!command)(?!embed)(?!hr)(?!img)(?!input)(?!keygen)(?!link)(?!menuitem)(?!meta)(?!param)(?!source)(?!track)(?!wbr)(?!/)(?!>)[a-zA-Z0-9_-]+[^>]*?>$ <ret> j <a-gt> } }
 }
 
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group html-highlight global WinSetOption filetype=(?:html|xml) %{ add-highlighter window/html ref html }
-
-hook global WinSetOption filetype=(?:html|xml) %{
-    hook window ModeChange insert:.* -group html-hooks  html-filter-around-selections
-    hook window InsertChar '>' -group html-indent html-indent-on-greater-than
-    hook window InsertChar \n -group html-indent html-indent-on-new-line
+hook -group html-highlight global WinSetOption filetype=(html|xml) %{
+    add-highlighter "window/%val{hook_param_capture_1}" ref html
+    hook -once -always window WinSetOption "filetype=.*" "
+        remove-highlighter ""window/%val{hook_param_capture_1}""
+    "
 }
 
-hook -group html-highlight global WinSetOption filetype=(?!html)(?!xml).* %{ remove-highlighter window/html }
+hook global WinSetOption filetype=(html|xml) %{
+    hook window ModeChange insert:.* -group "%val{hook_param_capture_1}-trim-indent"  html-trim-indent
+    hook window InsertChar '>' -group "%val{hook_param_capture_1}-indent" html-indent-on-greater-than
+    hook window InsertChar \n -group "%val{hook_param_capture_1}-indent" html-indent-on-new-line
 
-hook global WinSetOption filetype=(?!html)(?!xml).* %{
-    remove-hooks window html-indent
-    remove-hooks window html-hooks
+    hook -once -always window WinSetOption "filetype=.*" "
+        remove-hooks window ""%val{hook_param_capture_1}-.+""
+    "
 }

@@ -4,7 +4,7 @@
 # Detection
 # ‾‾‾‾‾‾‾‾‾
 
-hook global BufCreate .*(([.](rb))|(irbrc)|(pryrc)|(Capfile|[.]cap)|(Gemfile|[.]gemspec)|(Guardfile)|(Rakefile|[.]rake)|(Thorfile|[.]thor)|(Vagrantfile)) %{
+hook global BufCreate .*(([.](rb))|(irbrc)|(pryrc)|(Brewfile)|(Capfile|[.]cap)|(Gemfile|[.]gemspec)|(Guardfile)|(Rakefile|[.]rake)|(Thorfile|[.]thor)|(Vagrantfile)) %{
     set-option buffer filetype ruby
 }
 
@@ -23,7 +23,7 @@ add-highlighter shared/ruby/              region -recurse \( '%[iqrswxIQRSWX]\('
 add-highlighter shared/ruby/              region -recurse \{ '%[iqrswxIQRSWX]\{' \} fill meta
 add-highlighter shared/ruby/              region -recurse \[ '%[iqrswxIQRSWX]\[' \] fill meta
 add-highlighter shared/ruby/              region -recurse  < '%[iqrswxIQRSWX]<'   > fill meta
-add-highlighter shared/ruby/heredoc region '<<[-~]?(\w+)'      '^\h*(\w+)$' fill string
+add-highlighter shared/ruby/heredoc region '<<[-~]?(?!self)(\w+)'      '^\h*(\w+)$' fill string
 add-highlighter shared/ruby/division region '[\w\)\]](/|(\h+/\h+))' '\w' group # Help Kakoune to better detect /…/ literals
 
 # Regular expression flags are: i → ignore case, m → multi-lines, o → only interpolate #{} blocks once, x → extended mode (ignore white spaces)
@@ -93,7 +93,7 @@ define-command ruby-alternative-file -docstring 'Jump to the alternate file (imp
     echo "edit $altfile"
 }}
 
-define-command -hidden ruby-filter-around-selections %{
+define-command -hidden ruby-trim-indent %{
     evaluate-commands -no-hooks -draft -itersel %{
         execute-keys <a-x>
         # remove trailing white spaces
@@ -116,7 +116,7 @@ define-command -hidden ruby-indent-on-new-line %{
         # preserve previous line indent
         try %{ execute-keys -draft K <a-&> }
         # filter previous line
-        try %{ execute-keys -draft k : ruby-filter-around-selections <ret> }
+        try %{ execute-keys -draft k : ruby-trim-indent <ret> }
         # indent after start structure
         try %{ execute-keys -draft k <a-x> <a-k> ^ \h * (begin|case|class|def|do|else|elsif|ensure|for|if|module|rescue|unless|until|when|while) \b <ret> j <a-gt> }
     }
@@ -144,7 +144,10 @@ define-command -hidden ruby-insert-on-new-line %[
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group ruby-highlight global WinSetOption filetype=ruby %{ add-highlighter window/ruby ref ruby }
+hook -group ruby-highlight global WinSetOption filetype=ruby %{
+    add-highlighter window/ruby ref ruby
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/ruby }
+}
 
 hook global WinSetOption filetype=ruby %{
     hook window InsertChar .* -group ruby-indent ruby-indent-on-char
@@ -152,13 +155,9 @@ hook global WinSetOption filetype=ruby %{
     hook window InsertChar \n -group ruby-indent ruby-indent-on-new-line
 
     alias window alt ruby-alternative-file
-}
 
-hook -group ruby-highlight global WinSetOption filetype=(?!ruby).* %{ remove-highlighter window/ruby }
-
-hook global WinSetOption filetype=(?!ruby).* %{
-    remove-hooks window ruby-indent
-    remove-hooks window ruby-insert
-
-    unalias window alt ruby-alternative-file
+    hook -once -always window WinSetOption filetype=.* %{
+        remove-hooks window ruby-.+
+        unalias window alt ruby-alternative-file
+    }
 }

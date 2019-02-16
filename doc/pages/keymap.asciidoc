@@ -1,3 +1,6 @@
+= Keymap
+
+---
 ┌───────┬───────┬───────┬───────┬───────┬───────┬───────┬───────┬───────┬───────┬───────┬───────┬───────┲━━━━━━━━━━━━━━┓
 │  upper│ cmdout│convtab│       │selpipe│sel all│       │  align│pattern│ rotate│ rotate│   trim│       ┃ ⇤            ┃
 ├┄┄CASE┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┨              ┃
@@ -11,7 +14,7 @@
 ┃             ┠┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┤   find│  goto │       │       │       │       ├┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┨        ┃
 ┃             ┃ append│ select│ delete│   char│       │     ← │     ↓ │     ↑ │     → │ cursor│       │eschook┃        ┃
 ┣━━━━━━━━━┳━━━┹───┬───┴───┬───┴───┬───┴───┬───┴───┬───┴───┬───┴───┬───┴───┬───┴───┬───┴───┬───┴───┲━━━┷━━━━━━━┻━━━━━━━━┫
-┃         ┃ indent│   save│      ᵐ│copysel│      ᵛ│     ᵐʷ│     ᵐʳ│       │ dedent│ indent│     ᵐʳ┃                    ┃
+┃         ┃ indent│   save│      ᵐ│copysel│      ᵛ│     ᵐʷ│     ᵐʳ│     ᵐʳ│ dedent│ indent│     ᵐʳ┃                    ┃
 ┃         ┠┄┄┄┄┄┄┄┼┄MARKS┄┤ select├┄┄┄┄┄┄┄┤   view│   prev│ search│  match├┄┄┄┄┄┄┄┼┄┄┄┄┄┄┄┤ search┃                    ┃
 ┃ ⇧       ┃ dedent│restore│   line│ change│   cmds│   word│   next│   char│   user│ repeat│       ┃ ⇧                  ┃
 ┣━━━━━━━━━┻┳━━━━━━┷━━━┳━━━┷━━━━━┱─┴───────┴───────┴───────┴───────┴───────┴─┲━━━━━┷━━━━┳━━┷━━━━━━━╋━━━━━━━━━┳━━━━━━━━━━┫
@@ -27,3 +30,4 @@
  ᵍ: the g key prefix different goto location functionalities, such as going
     to begin/end of the file, opening the file whose name is selected, etc…
  ᵛ: the v key prefix different view related functionalities, such as scrolling
+---

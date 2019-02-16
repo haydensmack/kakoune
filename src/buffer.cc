@@ -114,16 +114,16 @@ void Buffer::on_registered()
         return;
     }
 
-    run_hook_in_own_context("BufCreate", m_name);
+    run_hook_in_own_context(Hook::BufCreate, m_name);
 
     if (m_flags & Flags::File)
     {
         if (m_flags & Buffer::Flags::New)
-            run_hook_in_own_context("BufNewFile", m_name);
+            run_hook_in_own_context(Hook::BufNewFile, m_name);
         else
         {
             kak_assert(m_fs_timestamp != InvalidTime);
-            run_hook_in_own_context("BufOpenFile", m_name);
+            run_hook_in_own_context(Hook::BufOpenFile, m_name);
         }
     }
 
@@ -139,7 +139,7 @@ void Buffer::on_unregistered()
         return;
 
     options().unregister_watcher(*this);
-    run_hook_in_own_context("BufClose", m_name);
+    run_hook_in_own_context(Hook::BufClose, m_name);
 }
 
 Buffer::~Buffer()
@@ -484,7 +484,7 @@ BufferCoord Buffer::do_insert(BufferCoord pos, StringView content)
                             : BufferCoord{ last_line, m_lines[last_line].length() - suffix.length() };
 
     m_changes.push_back({ Change::Insert, pos, end });
-    return pos;
+    return end;
 }
 
 BufferCoord Buffer::do_erase(BufferCoord begin, BufferCoord end)
@@ -687,11 +687,11 @@ void Buffer::on_option_changed(const Option& option)
         else
             m_flags &= ~Flags::ReadOnly;
     }
-    run_hook_in_own_context("BufSetOption",
+    run_hook_in_own_context(Hook::BufSetOption,
                             format("{}={}", option.name(), option.get_as_string(Quoting::Kakoune)));
 }
 
-void Buffer::run_hook_in_own_context(StringView hook_name, StringView param, String client_name)
+void Buffer::run_hook_in_own_context(Hook hook, StringView param, String client_name)
 {
     if (m_flags & Buffer::Flags::NoHooks)
         return;
@@ -699,7 +699,7 @@ void Buffer::run_hook_in_own_context(StringView hook_name, StringView param, Str
     InputHandler hook_handler{{ *this, Selection{} },
                               Context::Flags::Draft,
                               std::move(client_name)};
-    hooks().run_hook(hook_name, param, hook_handler.context());
+    hooks().run_hook(hook, param, hook_handler.context());
 }
 
 Optional<BufferCoord> Buffer::last_modification_coord() const
@@ -809,7 +809,8 @@ UnitTest test_buffer{[]()
 UnitTest test_undo{[]()
 {
     Buffer buffer("test", Buffer::Flags::None, "allo ?\nmais que fais la police\n hein ?\n youpi\n");
-    auto pos = buffer.insert(buffer.end_coord(), "kanaky\n"); // change 1
+    auto pos = buffer.end_coord();
+    buffer.insert(pos, "kanaky\n");                           // change 1
     buffer.commit_undo_group();
     buffer.erase(pos, buffer.end_coord());                    // change 2
     buffer.commit_undo_group();

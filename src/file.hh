@@ -2,6 +2,7 @@
 #define file_hh_INCLUDED
 
 #include "array_view.hh"
+#include "enum.hh"
 #include "meta.hh"
 #include "string.hh"
 #include "units.hh"
@@ -51,8 +52,30 @@ struct MappedFile
     struct stat st {};
 };
 
-void write_buffer_to_file(Buffer& buffer, StringView filename, bool force = false, bool sync = false);
-void write_buffer_to_fd(Buffer& buffer, int fd, bool sync = false);
+enum class WriteMethod
+{
+    Overwrite,
+    Replace
+};
+constexpr auto enum_desc(Meta::Type<WriteMethod>)
+{
+    return make_array<EnumDesc<WriteMethod>, 2>({
+        { WriteMethod::Overwrite, "overwrite" },
+        { WriteMethod::Replace, "replace" },
+    });
+}
+
+enum class WriteFlags
+{
+    None  = 0,
+    Force = 0b01,
+    Sync  = 0b10
+};
+constexpr bool with_bit_ops(Meta::Type<WriteFlags>) { return true; }
+
+void write_buffer_to_file(Buffer& buffer, StringView filename,
+                          WriteMethod method, WriteFlags flags);
+void write_buffer_to_fd(Buffer& buffer, int fd);
 void write_buffer_to_backup_file(Buffer& buffer);
 
 String find_file(StringView filename, StringView buf_dir, ConstArrayView<String> paths);

@@ -27,7 +27,7 @@ add-highlighter shared/ragel/code/ regex \b(action|alnum|alpha|any|ascii|case|cn
 # Commands
 # ‾‾‾‾‾‾‾‾
 
-define-command -hidden ragel-filter-around-selections %{
+define-command -hidden ragel-trim-indent %{
     # remove trailing white spaces
     try %{ execute-keys -draft -itersel <a-x> s \h+$ <ret> d }
 }
@@ -47,7 +47,7 @@ define-command -hidden ragel-indent-on-new-line %<
         # preserve previous line indent
         try %{ execute-keys -draft \; K <a-&> }
         # filter previous line
-        try %{ execute-keys -draft k : ragel-filter-around-selections <ret> }
+        try %{ execute-keys -draft k : ragel-trim-indent <ret> }
         # indent after lines ending with opener token
         try %< execute-keys -draft k <a-x> <a-k> [[{(*]$ <ret> j <a-gt> >
     >
@@ -56,17 +56,15 @@ define-command -hidden ragel-indent-on-new-line %<
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group ragel-highlight global WinSetOption filetype=ragel %{ add-highlighter window/ragel ref ragel }
-
-hook global WinSetOption filetype=ragel %{
-    hook window ModeChange insert:.* -group ragel-hooks  ragel-filter-around-selections
-    hook window InsertChar .* -group ragel-indent ragel-indent-on-char
-    hook window InsertChar \n -group ragel-indent ragel-indent-on-new-line
+hook -group ragel-highlight global WinSetOption filetype=ragel %{
+    add-highlighter window/ragel ref ragel
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/ragel }
 }
 
-hook -group ragel-highlight global WinSetOption filetype=(?!ragel).* %{ remove-highlighter window/ragel }
+hook global WinSetOption filetype=ragel %{
+    hook window ModeChange insert:.* -group ragel-trim-indent  ragel-trim-indent
+    hook window InsertChar .* -group ragel-indent ragel-indent-on-char
+    hook window InsertChar \n -group ragel-indent ragel-indent-on-new-line
 
-hook global WinSetOption filetype=(?!ragel).* %{
-    remove-hooks window ragel-indent
-    remove-hooks window ragel-hooks
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window ragel-.+ }
 }

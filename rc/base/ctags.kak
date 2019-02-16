@@ -7,8 +7,8 @@ declare-option -docstring "list of paths to tag files to parse when looking up a
     str-list ctagsfiles 'tags'
 
 define-command -params ..1 \
-    -shell-candidates %{
-        realpath() { ( path=$(readlink "$1"); cd "$(dirname "$1")"; printf "%s/%s\n" "$(pwd -P)" "$(basename "$1")" ) }
+    -shell-script-candidates %{
+        realpath() { ( cd "$(dirname "$1")"; printf "%s/%s\n" "$(pwd -P)" "$(basename "$1")" ) }
         eval "set -- $kak_opt_ctagsfiles"
         for candidate in "$@"; do
             [ -f "$candidate" ] && realpath "$candidate"
@@ -24,7 +24,7 @@ define-command -params ..1 \
 If no symbol is passed then the current selection is used as symbol name} \
     ctags-search \
     %{ evaluate-commands %sh{
-        realpath() { ( path=$(readlink "$1"); cd "$(dirname "$1")"; printf "%s/%s\n" "$(pwd -P)" "$(basename "$1")" ) }
+        realpath() { ( cd "$(dirname "$1")"; printf "%s/%s\n" "$(pwd -P)" "$(basename "$1")" ) }
         export tagname=${1:-${kak_selection}}
         eval "set -- $kak_opt_ctagsfiles"
         for candidate in "$@"; do
@@ -39,10 +39,13 @@ If no symbol is passed then the current selection is used as symbol name} \
             re=$0;
             sub(".*\t/\\^", "", re); sub("\\$?/$", "", re); gsub("(\\{|\\}|\\\\E).*$", "", re);
             keys=re; gsub(/</, "<lt>", keys); gsub(/\t/, "<c-v><c-i>", keys);
-            out = out " %{" $2 " {MenuInfo}" re "} %{evaluate-commands %{ try %{ edit %{" tagroot $2 "}; execute-keys %{/\\Q" keys "<ret>vc} } catch %{ echo %{unable to find tag} } } }"
+            out = out " %{" $2 " {MenuInfo}" re "} %{evaluate-commands %{ try %{ edit %{" path($2) "}; execute-keys %{/\\Q" keys "<ret>vc} } catch %{ echo %{unable to find tag} } } }"
         }
-        /[^\t]+\t[^\t]+\t[0-9]+/ { out = out " %{" $2 ":" $3 "} %{evaluate-commands %{ edit %{" tagroot $2 "} %{" $3 "}}}" }
-        END { print ( length(out) == 0 ? "echo -markup %{{Error}no such tag " ENVIRON["tagname"] "}" : "menu -markup -auto-single " out ) }'
+        /[^\t]+\t[^\t]+\t[0-9]+/ { out = out " %{" $2 ":" $3 "} %{evaluate-commands %{ edit %{" path($2) "} %{" $3 "}}}" }
+        END { print ( length(out) == 0 ? "echo -markup %{{Error}no such tag " ENVIRON["tagname"] "}" : "menu -markup -auto-single " out ) }
+
+        # Ensure x is an absolute file path, by prepending with tagroot
+        function path(x) { return x ~/^\// ? x : tagroot x }'
     }}
 
 define-command ctags-complete -docstring "Insert completion candidates for the current selection into the buffer's local variables" %{ evaluate-commands -draft %{
@@ -59,7 +62,10 @@ define-command ctags-funcinfo -docstring "Display ctags information about a sele
         try %{
             execute-keys '[(;B<a-k>[a-zA-Z_]+\(<ret><a-;>'
             evaluate-commands %sh{
-                sigs=$(readtags -e ${kak_selection%?} | grep kind:f | sed -re 's/^(\S+).*((class|struct|namespace):(\S+))?.*signature:(.*)$/\5 [\4::\1]/')
+                f=${kak_selection%?}
+                sig='\tsignature:(.*)'
+                csn='\t(class|struct|namespace):(\S+)'
+                sigs=$(readtags -e -Q '(eq? $kind "f")' "${f}" | sed -re "s/^.*${csn}.*${sig}$/\3 [\2::${f}]/ ;t ;s/^.*${sig}$/\1 [${f}]/")
                 if [ -n "$sigs" ]; then
                     printf %s\\n "evaluate-commands -client ${kak_client} %{info -anchor $kak_cursor_line.$kak_cursor_column -placement above '$sigs'}"
                 fi
@@ -76,7 +82,7 @@ define-command ctags-enable-autoinfo -docstring "Automatically display ctags inf
 define-command ctags-disable-autoinfo -docstring "Disable automatic ctags information displaying" %{ remove-hooks window ctags-autoinfo }
 
 declare-option -docstring "shell command to run" \
-    str ctagscmd "ctags -R"
+    str ctagscmd "ctags -R --fields=+S"
 declare-option -docstring "path to the directory in which the tags file will be generated" str ctagspaths "."
 
 define-command ctags-generate -docstring 'Generate tag file asynchronously' %{

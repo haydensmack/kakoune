@@ -79,7 +79,7 @@ evaluate-commands %sh{
     exceptions="${exceptions}|ZeroDivisionError"
 
     # Keyword list is collected using `keyword.kwlist` from `keyword`
-    keywords="and|as|assert|break|class|continue|def|del|elif|else|except|exec"
+    keywords="and|as|assert|async|await|break|class|continue|def|del|elif|else|except|exec"
     keywords="${keywords}|finally|for|global|if|in|is|lambda|nonlocal|not|or|pass|print"
     keywords="${keywords}|raise|return|try|while|with|yield"
 
@@ -135,16 +135,14 @@ define-command -hidden python-indent-on-new-line %{
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group python-highlight global WinSetOption filetype=python %{ add-highlighter window/python ref python }
+hook -group python-highlight global WinSetOption filetype=python %{
+    add-highlighter window/python ref python
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/python }
+}
 
 hook global WinSetOption filetype=python %{
     hook window InsertChar \n -group python-indent python-indent-on-new-line
     # cleanup trailing whitespaces on current line insert end
-    hook window ModeChange insert:.* -group python-indent %{ try %{ execute-keys -draft \; <a-x> s ^\h+$ <ret> d } }
-}
-
-hook -group python-highlight global WinSetOption filetype=(?!python).* %{ remove-highlighter window/python }
-
-hook global WinSetOption filetype=(?!python).* %{
-    remove-hooks window python-indent
+    hook window ModeChange insert:.* -group python-trim-indent %{ try %{ execute-keys -draft \; <a-x> s ^\h+$ <ret> d } }
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window python-.+ }
 }

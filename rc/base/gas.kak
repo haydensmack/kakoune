@@ -4,7 +4,6 @@ hook global BufCreate .*\.(s|S|asm)$ %{
     set-option buffer filetype gas
 }
 
-
 add-highlighter shared/gas regions
 add-highlighter shared/gas/code default-region group
 add-highlighter shared/gas/string         region '"' (?<!\\)(\\\\)*"        fill string
@@ -13,7 +12,7 @@ add-highlighter shared/gas/commentSingle1 region '#'       '$'              fill
 add-highlighter shared/gas/commentSingle2 region ';'       '$'              fill comment
 
 # Constant
-add-highlighter shared/gas/code/ regex (0[xX][0-9]+|\b[0-9]+)\b 0:value
+add-highlighter shared/gas/code/ regex (0[xX][0-9a-fA-F]+|\b[0-9]+)\b 0:value
 
 # Labels
 add-highlighter shared/gas/code/ regex ^\h*([A-Za-z0-9_.-]+): 0:operator
@@ -62,7 +61,7 @@ add-highlighter shared/gas/code/ regex \
 ^\h*(cvttp[ds]2dq|cvttp[ds]2pi|cvtts[ds]2si)\b|\
 ^\h*(vxorp[sd]|vandp[sd]|ucomis[sd])\b 0:keyword
 
-define-command -hidden gas-filter-around-selections %{
+define-command -hidden gas-trim-indent %{
     evaluate-commands -draft -itersel %{
         execute-keys <a-x>
         # remove trailing white spaces
@@ -75,20 +74,18 @@ define-command -hidden gas-indent-on-new-line %~
         # preserve previous line indent
         try %{ execute-keys -draft \; K <a-&> }
         # filter previous line
-        try %{ execute-keys -draft k : gas-filter-around-selections <ret> }
+        try %{ execute-keys -draft k : gas-trim-indent <ret> }
         # indent after label
         try %[ execute-keys -draft k <a-x> <a-k> :$ <ret> j <a-gt> ]
     >
 ~
 
-hook -group gas-highlight global WinSetOption filetype=gas %{ add-highlighter window/gas ref gas }
+hook -group gas-highlight global WinSetOption filetype=gas %{
+    add-highlighter window/gas ref gas
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/gas }
+}
 
 hook global WinSetOption filetype=gas %{
     hook window InsertChar \n -group gas-indent gas-indent-on-new-line
-}
-
-hook -group gas-highlight global WinSetOption filetype=(?!gas).* %{ remove-highlighter window/gas }
-
-hook global WinSetOption filetype=(?!gas).* %{
-    remove-hooks window gas-indent
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window gas-.+ }
 }

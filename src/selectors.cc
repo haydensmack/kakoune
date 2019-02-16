@@ -3,11 +3,10 @@
 #include "buffer_utils.hh"
 #include "context.hh"
 #include "flags.hh"
-#include "optional.hh"
 #include "option_types.hh"
 #include "regex.hh"
+#include "selection.hh"
 #include "string.hh"
-#include "unicode.hh"
 #include "unit_tests.hh"
 #include "utf8_iterator.hh"
 
@@ -20,12 +19,6 @@ using Utf8Iterator = utf8::iterator<BufferIterator>;
 
 namespace
 {
-
-Selection target_eol(Selection sel)
-{
-    sel.cursor().target = INT_MAX;
-    return sel;
-}
 
 Selection utf8_range(const BufferIterator& first, const BufferIterator& last)
 {
@@ -42,6 +35,13 @@ ConstArrayView<Codepoint> get_extra_word_chars(const Context& context)
     return context.options()["extra_word_chars"].get<Vector<Codepoint, MemoryDomain::Options>>();
 }
 
+}
+
+Selection keep_direction(Selection res, const Selection& ref)
+{
+    if ((res.cursor() < res.anchor()) != (ref.cursor() < ref.anchor()))
+        std::swap<BufferCoord>(res.cursor(), res.anchor());
+    return res;
 }
 
 template<WordType word_type>
@@ -63,6 +63,7 @@ select_to_next_word(const Context& context, const Selection& selection)
     Utf8Iterator end = begin+1;
 
     auto is_word = [&](Codepoint c) { return Kakoune::is_word<word_type>(c, extra_word_chars); };
+    auto is_punctuation = [&](Codepoint c) { return Kakoune::is_punctuation(c, extra_word_chars); };
 
     if (is_word(*begin))
         skip_while(end, buffer.end(), is_word);
@@ -96,6 +97,7 @@ select_to_next_word_end(const Context& context, const Selection& selection)
     skip_while(end, buffer.end(), is_horizontal_blank);
 
     auto is_word = [&](Codepoint c) { return Kakoune::is_word<word_type>(c, extra_word_chars); };
+    auto is_punctuation = [&](Codepoint c) { return Kakoune::is_punctuation(c, extra_word_chars); };
 
     if (is_word(*end))
         skip_while(end, buffer.end(), is_word);
@@ -124,6 +126,7 @@ select_to_previous_word(const Context& context, const Selection& selection)
     Utf8Iterator end = begin;
 
     auto is_word = [&](Codepoint c) { return Kakoune::is_word<word_type>(c, extra_word_chars); };
+    auto is_punctuation = [&](Codepoint c) { return Kakoune::is_punctuation(c, extra_word_chars); };
 
     bool with_end = skip_while_reverse(end, buffer.begin(), is_horizontal_blank);
     if (is_word(*end))
@@ -180,7 +183,7 @@ select_line(const Context& context, const Selection& selection)
         selection.cursor() == BufferCoord{line, buffer[line].length() - 1} and
         line != buffer.line_count() - 1)
         ++line;
-    return target_eol({{line, 0_byte}, {line, buffer[line].length() - 1}});
+    return Selection{{line, 0_byte}, {line, buffer[line].length() - 1, max_column}};
 }
 
 template<bool only_move>
@@ -194,7 +197,7 @@ select_to_line_end(const Context& context, const Selection& selection)
                                      buffer.iterator_at(line)).coord();
     if (end < begin) // Do not go backward when cursor is on eol
         end = begin;
-    return target_eol({only_move ? end : begin, end});
+    return Selection{only_move ? end : begin, {end, max_column}};
 }
 template Optional<Selection> select_to_line_end<false>(const Context&, const Selection&);
 template Optional<Selection> select_to_line_end<true>(const Context&, const Selection&);
@@ -220,6 +223,7 @@ select_to_first_non_blank(const Context& context, const Selection& selection)
     return {it.coord()};
 }
 
+template<bool forward>
 Optional<Selection>
 select_matching(const Context& context, const Selection& selection)
 {
@@ -227,13 +231,23 @@ select_matching(const Context& context, const Selection& selection)
     auto& matching_pairs = context.options()["matching_pairs"].get<Vector<Codepoint, MemoryDomain::Options>>();
     Utf8Iterator it{buffer.iterator_at(selection.cursor()), buffer};
     auto match = matching_pairs.end();
-    while (it != buffer.end())
+
+    if (forward) while (it != buffer.end())
     {
         match = find(matching_pairs, *it);
         if (match != matching_pairs.end())
             break;
         ++it;
     }
+    else while (true)
+    {
+        match = find(matching_pairs, *it);
+        if (match != matching_pairs.end()
+            or it == buffer.begin())
+            break;
+        --it;
+    }
+
     if (match == matching_pairs.end())
         return {};
 
@@ -271,6 +285,10 @@ select_matching(const Context& context, const Selection& selection)
     }
     return {};
 }
+template Optional<Selection>
+select_matching<true>(const Context& context, const Selection& selection);
+template Optional<Selection>
+select_matching<false>(const Context& context, const Selection& selection);
 
 template<typename Iterator, typename Container>
 Optional<std::pair<Iterator, Iterator>>
@@ -279,13 +297,15 @@ find_opening(Iterator pos, const Container& container,
              int level, bool nestable)
 {
     MatchResults<Iterator> res;
-    if (backward_regex_search(container.begin(), pos,
+    // When on the token of a non-nestable block, we want to consider it opening
+    if (nestable and
+        backward_regex_search(container.begin(), pos,
                               container.begin(), container.end(), res, closing) and
         res[0].second == pos)
         pos = res[0].first;
 
-    using RegexIt = RegexIterator<Iterator, MatchDirection::Backward>;
-    for (auto match : RegexIt{container.begin(), pos, container.begin(), container.end(), opening})
+    using RegexIt = RegexIterator<Iterator, RegexMode::Backward>;
+    for (auto&& match : RegexIt{container.begin(), pos, container.begin(), container.end(), opening})
     {
         if (nestable)
         {
@@ -312,7 +332,7 @@ find_closing(Iterator pos, const Container& container,
                      res, opening) and res[0].first == pos)
         pos = res[0].second;
 
-    using RegexIt = RegexIterator<Iterator, MatchDirection::Forward>;
+    using RegexIt = RegexIterator<Iterator, RegexMode::Forward>;
     for (auto match : RegexIt{pos, container.end(), container.begin(), container.end(), closing})
     {
         if (nestable)
@@ -336,30 +356,16 @@ find_surrounding(const Container& container, Iterator pos,
                  ObjectFlags flags, int level)
 {
     const bool nestable = opening != closing;
-
-    // When onto the token of a non nestable block, consider it as an opening.
-    MatchResults<Iterator> matches;
-    if (not nestable and regex_search(pos, container.end(), container.begin(),
-                                      container.end(), matches, opening) and
-        matches[0].first == pos)
-        pos = matches[0].second;
-
     auto first = pos;
     auto last = pos;
     if (flags & ObjectFlags::ToBegin)
     {
-        // When positionned onto opening and searching to opening, search the parent one
-        if (nestable and first != container.begin() and not (flags & ObjectFlags::ToEnd) and
-            regex_search(first, container.end(), container.begin(), container.end(),
-                         matches, opening) and matches[0].first == first)
-            first = utf8::previous(first, container.begin());
-
         if (auto res = find_opening(first+1, container, opening, closing, level, nestable))
         {
             first = (flags & ObjectFlags::Inner) ? res->second : res->first;
             if (flags & ObjectFlags::ToEnd) // ensure we find the matching end
             {
-                last = res->second;
+                last = res->first;
                 level = 0;
             }
         }
@@ -368,13 +374,6 @@ find_surrounding(const Container& container, Iterator pos,
     }
     if (flags & ObjectFlags::ToEnd)
     {
-        // When positionned onto closing and searching to closing, search the parent one
-        auto next = utf8::next(last, container.end());
-        if (nestable and next != container.end() and not (flags & ObjectFlags::ToBegin) and
-            backward_regex_search(container.begin(), next, container.begin(), container.end(),
-                                  matches, closing) and matches[0].second == next)
-            last = next;
-
         if (auto res = find_closing(last, container, opening, closing, level, nestable))
             last = (flags & ObjectFlags::Inner) ? utf8::previous(res->first, container.begin())
                                                 : utf8::previous(res->second, container.begin());
@@ -397,9 +396,10 @@ select_surrounding(const Context& context, const Selection& selection,
 
     auto res = find_surrounding(buffer, pos, opening, closing, flags, level);
 
-    // When we already had the full object selected, select its parent
-    if (res and flags == (ObjectFlags::ToBegin | ObjectFlags::ToEnd) and
-        res->first.coord() == selection.min() and res->second.coord() == selection.max())
+    // If the ends we're changing didn't move, find the parent
+    if (res and not (flags & ObjectFlags::Inner) and
+        (res->first.coord() == selection.min() or not (flags & ObjectFlags::ToBegin)) and
+        (res->second.coord() == selection.max() or not (flags & ObjectFlags::ToEnd)))
         res = find_surrounding(buffer, pos, opening, closing, flags, level+1);
 
     if (res)
@@ -823,7 +823,7 @@ select_lines(const Context& context, const Selection& selection)
     to_line_start.column = 0;
     to_line_end.column = buffer[to_line_end.line].length()-1;
 
-    return target_eol({anchor, cursor});
+    return Selection{anchor, {cursor, max_column}};
 }
 
 Optional<Selection>
@@ -849,13 +849,7 @@ trim_partial_lines(const Context& context, const Selection& selection)
     if (to_line_start > to_line_end)
         return {};
 
-    return target_eol({anchor, cursor});
-}
-
-void select_buffer(SelectionList& selections)
-{
-    auto& buffer = selections.buffer();
-    selections = SelectionList{ buffer, target_eol({{0,0}, buffer.back_coord()}) };
+    return Selection{anchor, {cursor, max_column}};
 }
 
 static RegexExecFlags
@@ -895,14 +889,16 @@ static bool find_prev(const Buffer& buffer, const BufferIterator& pos,
                                  RegexExecFlags::NotInitialNull);
 }
 
-template<MatchDirection direction>
+template<RegexMode mode>
 Selection find_next_match(const Context& context, const Selection& sel, const Regex& regex, bool& wrapped)
 {
+    static_assert(is_direction(mode));
+    constexpr bool forward = mode & RegexMode::Forward;
     auto& buffer = context.buffer();
     MatchResults<BufferIterator> matches;
-    auto pos = buffer.iterator_at(direction == MatchDirection::Backward ? sel.min() : sel.max());
+    auto pos = buffer.iterator_at(forward ? sel.max() : sel.min());
     wrapped = false;
-    const bool found = (direction == MatchDirection::Forward) ?
+    const bool found = forward ?
         find_next(buffer, utf8::next(pos, buffer.end()), matches, regex, wrapped)
       : find_prev(buffer, pos, matches, regex, wrapped);
 
@@ -915,43 +911,39 @@ Selection find_next_match(const Context& context, const Selection& sel, const Re
 
     auto begin = matches[0].first, end = matches[0].second;
     end = (begin == end) ? end : utf8::previous(end, begin);
-    if (direction == MatchDirection::Backward)
+    if (not forward)
         std::swap(begin, end);
 
     return {begin.coord(), end.coord(), std::move(captures)};
 }
-template Selection find_next_match<MatchDirection::Forward>(const Context&, const Selection&, const Regex&, bool&);
-template Selection find_next_match<MatchDirection::Backward>(const Context&, const Selection&, const Regex&, bool&);
+template Selection find_next_match<RegexMode::Forward>(const Context&, const Selection&, const Regex&, bool&);
+template Selection find_next_match<RegexMode::Backward>(const Context&, const Selection&, const Regex&, bool&);
 
-using RegexIt = RegexIterator<BufferIterator>;
-
-void select_all_matches(SelectionList& selections, const Regex& regex, int capture)
+Vector<Selection> select_matches(const Buffer& buffer, ConstArrayView<Selection> selections, const Regex& regex, int capture)
 {
     const int mark_count = (int)regex.mark_count();
     if (capture < 0 or capture > mark_count)
         throw runtime_error("invalid capture number");
 
     Vector<Selection> result;
-    auto& buffer = selections.buffer();
+    ThreadedRegexVM<BufferIterator, RegexMode::Forward | RegexMode::Search> vm{*regex.impl()};
     for (auto& sel : selections)
     {
         auto sel_beg = buffer.iterator_at(sel.min());
         auto sel_end = utf8::next(buffer.iterator_at(sel.max()), buffer.end());
-        RegexIt re_it(sel_beg, sel_end, regex, match_flags(buffer, sel_beg, sel_end));
-        RegexIt re_end;
 
-        for (; re_it != re_end; ++re_it)
+        for (auto&& match : RegexIterator{sel_beg, sel_end, vm, match_flags(buffer, sel_beg, sel_end)})
         {
-            auto begin = (*re_it)[capture].first;
+            auto begin = match[capture].first;
             if (begin == sel_end)
                 continue;
-            auto end = (*re_it)[capture].second;
+            auto end = match[capture].second;
 
             CaptureList captures;
             captures.reserve(mark_count);
-            for (const auto& match : *re_it)
-                captures.push_back(buffer.string(match.first.coord(),
-                                                 match.second.coord()));
+            for (const auto& submatch : match)
+                captures.push_back(buffer.string(submatch.first.coord(),
+                                                 submatch.second.coord()));
 
             result.push_back(
                 keep_direction({ begin.coord(),
@@ -961,32 +953,26 @@ void select_all_matches(SelectionList& selections, const Regex& regex, int captu
     }
     if (result.empty())
         throw runtime_error("nothing selected");
-
-    // Avoid SelectionList::operator=(Vector<Selection>) as we know result is
-    // already sorted and non overlapping.
-    selections = SelectionList{buffer, std::move(result)};
+    return result;
 }
 
-void split_selections(SelectionList& selections, const Regex& regex, int capture)
+Vector<Selection> split_on_matches(const Buffer& buffer, ConstArrayView<Selection> selections, const Regex& regex, int capture)
 {
     if (capture < 0 or capture > (int)regex.mark_count())
         throw runtime_error("invalid capture number");
 
     Vector<Selection> result;
-    auto& buffer = selections.buffer();
     auto buf_end = buffer.end();
     auto buf_begin = buffer.begin();
+    ThreadedRegexVM<BufferIterator, RegexMode::Forward | RegexMode::Search> vm{*regex.impl()};
     for (auto& sel : selections)
     {
         auto begin = buffer.iterator_at(sel.min());
-        auto sel_end = utf8::next(buffer.iterator_at(sel.max()), buffer.end());
+        auto sel_end = utf8::next(buffer.iterator_at(sel.max()), buf_end);
 
-        RegexIt re_it(begin, sel_end, regex, match_flags(buffer, begin, sel_end));
-        RegexIt re_end;
-
-        for (; re_it != re_end; ++re_it)
+        for (auto&& match : RegexIterator{begin, sel_end, vm, match_flags(buffer, begin, sel_end)})
         {
-            BufferIterator end = (*re_it)[capture].first;
+            BufferIterator end = match[capture].first;
             if (end == buf_end)
                 continue;
 
@@ -995,15 +981,14 @@ void split_selections(SelectionList& selections, const Regex& regex, int capture
                 auto sel_end = (begin == end) ? end : utf8::previous(end, begin);
                 result.push_back(keep_direction({ begin.coord(), sel_end.coord() }, sel));
             }
-            begin = (*re_it)[capture].second;
+            begin = match[capture].second;
         }
         if (begin.coord() <= sel.max())
             result.push_back(keep_direction({ begin.coord(), sel.max() }, sel));
     }
     if (result.empty())
         throw runtime_error("nothing selected");
-
-    selections = std::move(result);
+    return result;
 }
 
 UnitTest test_find_surrounding{[]()

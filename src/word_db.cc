@@ -1,10 +1,11 @@
 #include "word_db.hh"
 
-#include "utils.hh"
+#include "buffer.hh"
 #include "line_modification.hh"
 #include "option_types.hh"
-#include "utf8_iterator.hh"
 #include "unit_tests.hh"
+#include "utils.hh"
+#include "value.hh"
 
 namespace Kakoune
 {
@@ -20,7 +21,7 @@ WordDB& get_word_db(const Buffer& buffer)
 
 struct WordSplitter
 {
-    struct Iterator : std::iterator<std::forward_iterator_tag, StringView>
+    struct Iterator
     {
         Iterator(const char* begin, const WordSplitter& splitter)
             : m_word_begin{begin}, m_word_end{begin}, m_splitter{&splitter}
@@ -31,16 +32,13 @@ struct WordSplitter
         Iterator& operator++()
         {
             const auto* end = m_splitter->m_content.end();
-            auto is_word = [&](const char* ptr) {
-                const Codepoint c = utf8::codepoint(ptr, end);
-                return Kakoune::is_word(c) or contains(m_splitter->m_extra_word_chars, c);
-            };
+            auto extra_chars = m_splitter->m_extra_word_chars;
 
             m_word_begin = m_word_end;
-            while (m_word_begin != end and not is_word(m_word_begin))
+            while (m_word_begin != end and not is_word(utf8::codepoint(m_word_begin, end), extra_chars))
                 utf8::to_next(m_word_begin, end);
             m_word_end = m_word_begin;
-            while (m_word_end != end and is_word(m_word_end))
+            while (m_word_end != end and is_word(utf8::codepoint(m_word_end, end), extra_chars))
                 utf8::to_next(m_word_end, end);
             return *this;
         }

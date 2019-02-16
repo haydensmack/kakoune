@@ -1,7 +1,6 @@
 #ifndef array_view_hh_INCLUDED
 #define array_view_hh_INCLUDED
 
-#include <vector>
 #include <initializer_list>
 #include <iterator>
 
@@ -31,10 +30,10 @@ public:
     template<size_t N>
     constexpr ArrayView(T(&array)[N]) : m_pointer(array), m_size(N) {}
 
-    template<typename Alloc, typename U,
-             typename = std::enable_if_t<sizeof(U) == sizeof(T)>>
-    constexpr ArrayView(const std::vector<U, Alloc>& v)
-        : m_pointer(v.data()), m_size(v.size()) {}
+    template<typename Container,
+             typename = std::enable_if_t<sizeof(decltype(*std::declval<Container>().data())) == sizeof(T)>>
+    constexpr ArrayView(const Container& c)
+        : m_pointer(c.data()), m_size(c.size()) {}
 
     constexpr ArrayView(const std::initializer_list<T>& v)
         : m_pointer(v.begin()), m_size(v.size()) {}
@@ -59,8 +58,9 @@ public:
 
     constexpr ArrayView subrange(size_t first, size_t count = -1) const
     {
-        return ArrayView(m_pointer + std::min(first, m_size),
-                         std::min(count, m_size - std::min(first, m_size)));
+        auto min = [](size_t a, size_t b) { return a < b ? a : b; };
+        return ArrayView(m_pointer + min(first, m_size),
+                         min(count, m_size - min(first, m_size)));
     }
 
 private:

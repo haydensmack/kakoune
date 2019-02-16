@@ -1,4 +1,4 @@
-= image:{logo}[K,30,30,link="{website}"] Kakoune image:{travis-img}[link="{travis-url}"] image:{irc-img}[link="{irc-url}"]
+= image:{logo}[K,30,30,link="{website}",title="Kakoune logo by p0nce"] Kakoune image:{travis-img}[link="{travis-url}"] image:{irc-img}[link="{irc-url}"]
 ifdef::env-github,env-browser[:outfilesuffix: .asciidoc]
 :logo: https://rawgit.com/mawww/kakoune/master/doc/kakoune_logo.svg
 :website: http://kakoune.org
@@ -103,10 +103,9 @@ Building
 
 Kakoune dependencies are:
 
- * A {cpp}14 compliant compiler (GCC >= 5 or clang >= 3.9) along with its
+ * A {cpp}17 compliant compiler (GCC >= 7 or clang >= 5) along with its
    associated {cpp} standard library (libstdc{pp} or libc{pp})
  * ncurses with wide-characters support (>= 5.3, generally referred to as libncursesw)
- * asciidoc (for the `a2k` tool), to generate man pages
 
 To build, just type *make* in the src directory.
 To generate man pages, type *make man* in the src directory.
@@ -189,7 +188,7 @@ Building on Ubuntu 16.04.
 Make sure you have .local/bin in your path to make the kak binary available from your shell.
 
 ----------------------------------------------------------------
-sudo apt install libncursesw5-dev asciidoc
+sudo apt install libncursesw5-dev pkg-config
 git clone https://github.com/mawww/kakoune.git && cd kakoune/src
 make
 PREFIX=$HOME/.local make install
@@ -217,6 +216,28 @@ It can be installed with
 ---------------------
 eopkg install kakoune
 ---------------------
+====
+
+[TIP]
+.Void
+====
+Kakoune is available in the repositories.
+
+It can be installed with
+-----------------------
+xbps-install -S kakoune
+-----------------------
+====
+
+[TIP]
+.Termux
+====
+Kakoune is available in the repositories.
+
+It can be installed with
+-------------------
+pkg install kakoune
+-------------------
 ====
 
 Running
@@ -309,18 +330,20 @@ selection's cursor. Some additional keys are recognised in insert mode:
 Movement
 ~~~~~~~~
 
+See <<Appending>> below for instructions on extending (appending to) the current selection, in order to select more text in multiple steps.
+
  * `h`: select the character on the left of selection end
  * `j`: select the character below the selection end
  * `k`: select the character above the selection end
  * `l`: select the character on the right of selection end
 
- * `w`: select the word and following whitespaces  on the right of selection end
+ * `w`: select the word and following whitespaces on the right of selection end
  * `b`: select preceding whitespaces and the word on the left of selection end
  * `e`: select preceding whitespaces and the word on the right of selection end
  * `<a-[wbe]>`: same as [wbe] but select WORD instead of word
 
- * `f`: select to the next occurence of given character
- * `t`: select until the next occurence of given character
+ * `f`: select to (including) the next occurrence of the given character
+ * `t`: select until (excluding) the next occurrence of the given character
  * `<a-[ft]>`: same as [ft] but in the other direction
 
  * `m`: select to matching character
@@ -369,8 +392,13 @@ sequence of non whitespace characters.
 Appending
 ~~~~~~~~~
 
-for most selection commands, using shift permits extending current selection
-instead of replacing it. for example, `wWW` selects 3 consecutive words
+For most <<Movement>> commands, using `Shift` extends the current selection
+instead of replacing it.
+
+Examples:
+
+ * `wWW` selects 3 consecutive words: first `w` selects a word, then `WW` extends the selection two words further.
+ * `f/F/` selects up to and including the second `/` character forward.
 
 Using Counts
 ~~~~~~~~~~~~
@@ -809,3 +837,14 @@ entry, and `k`, `<c-p>` or `<shift-tab>` to select the previous one.
 
 Using the `/` key, you can enter some regex in order to restrict available choices
 to the matching ones.
+
+Credits
+-------
+
+Thanks to https://github.com/p0nce[p0nce] for designing the
+https://github.com/mawww/kakoune/blob/master/doc/kakoune_logo.svg[Kakoune
+logo].
+
+And thanks to all the
+https://github.com/mawww/kakoune/graphs/contributors[contributors] who help
+move the project forward!

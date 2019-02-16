@@ -26,9 +26,10 @@
 #include "string.hh"
 #include "unit_tests.hh"
 #include "window.hh"
+#include "clock.hh"
 
 #include <fcntl.h>
-#include <locale>
+#include <locale.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -43,6 +44,16 @@ struct {
     unsigned int version;
     const char* notes;
 } constexpr version_notes[] = { {
+        20190120,
+        "» named capture groups in regex\n"
+        "» auto_complete option renamed to autocomplete\n"
+    }, {
+        20181027,
+        "» define-commands -shell-completion and -shell-candidates has been renamed\n"
+        "» exclusive face attributes is replaced with final (fg/bg/attr)\n"
+        "» <a-M> (merge consecutive) moved to <a-_> to make <a-M> backward <a-m>\n"
+        "» remove-hooks now takes a regex parameter\n"
+    }, {
         20180904,
         "» Big breaking refactoring of various Kakoune features,\n"
         "  configuration might need to be updated see `:doc changelog` for details\n"
@@ -89,7 +100,7 @@ struct startup_error : runtime_error
     using runtime_error::runtime_error;
 };
 
-inline void write_stdout(StringView str) { write(1, str); }
+inline void write_stdout(StringView str) { try { write(1, str); } catch (runtime_error&) {} }
 inline void write_stderr(StringView str) { try { write(2, str); } catch (runtime_error&) {} }
 
 String runtime_directory()
@@ -229,6 +240,16 @@ static const EnvVarDesc builtin_env_vars[] = { {
         [](StringView name, const Context& context, Quoting quoting)
         { return selection_list_to_string(context.selections()); }
     }, {
+        "selection_length", false,
+        [](StringView name, const Context& context, Quoting quoting) -> String
+        { return to_string(char_length(context.buffer(), context.selections().main())); }
+    }, {
+        "selections_length", false,
+        [](StringView name, const Context& context, Quoting quoting)
+        { return join(context.selections() |
+                      transform([&](const Selection& s)
+                               { return to_string(char_length(context.buffer(), s)); }), ' ', false); }
+    }, {
         "window_width", false,
         [](StringView name, const Context& context, Quoting quoting) -> String
         { return to_string(context.window().dimensions().column); }
@@ -331,7 +352,7 @@ static void check_matching_pairs(const Vector<Codepoint, MemoryDomain::Options>&
 {
     if ((pairs.size() % 2) != 0)
         throw runtime_error{"matching pairs should have a pair number of element"};
-    if (not all_of(pairs, is_punctuation))
+    if (not all_of(pairs, [](Codepoint cp) { return is_punctuation(cp); }))
         throw runtime_error{"matching pairs can only be punctuation"};
 }
 
@@ -353,7 +374,7 @@ void register_options()
     reg.declare_option("autoinfo",
                        "automatically display contextual help",
                        AutoInfo::Command | AutoInfo::OnKey);
-    reg.declare_option("auto_complete",
+    reg.declare_option("autocomplete",
                        "automatically display possible completions",
                        AutoComplete::Insert | AutoComplete::Prompt);
     reg.declare_option("aligntab",
@@ -378,6 +399,9 @@ void register_options()
     reg.declare_option("autoreload",
                        "autoreload buffer when a filesystem modification is detected",
                        Autoreload::Ask);
+    reg.declare_option("writemethod",
+                       "how to write buffer to files",
+                       WriteMethod::Overwrite);
     reg.declare_option<int, check_timeout>(
         "idle_timeout", "timeout, in milliseconds, before idle hooks are triggered", 50);
     reg.declare_option<int, check_timeout>(
@@ -396,7 +420,8 @@ void register_options()
                        "    ncurses_change_colors         bool\n"
                        "    ncurses_wheel_up_button       int\n"
                        "    ncurses_wheel_down_button     int\n"
-                       "    ncurses_shift_function_key    int\n",
+                       "    ncurses_shift_function_key    int\n"
+                       "    ncurses_builtin_key_parser    bool\n",
                        UserInterface::Options{});
     reg.declare_option("modelinefmt", "format string used to generate the modeline",
                        "%val{bufname} %val{cursor_line}:%val{cursor_char_column} {{context_info}} {{mode_info}} - %val{client}@[%val{session}]"_str);
@@ -406,7 +431,7 @@ void register_options()
     reg.declare_option<Vector<Codepoint, MemoryDomain::Options>, check_extra_word_chars>(
         "extra_word_chars",
         "Additional characters to be considered as words for insert completion",
-        {});
+        { '_' });
     reg.declare_option<Vector<Codepoint, MemoryDomain::Options>, check_matching_pairs>(
         "matching_pairs",
         "set of pair of characters to be considered as matching pairs",
@@ -634,9 +659,17 @@ int run_server(StringView session, StringView server_init,
 
     global_scope.options()["debug"].set(debug_flags);
 
+    write_to_debug_buffer("*** This is the debug buffer, where debug info will be written ***");
+
+    const auto start_time = Clock::now();
     UnitTest::run_all_tests();
 
-    write_to_debug_buffer("*** This is the debug buffer, where debug info will be written ***");
+    if (debug_flags & DebugFlags::Profile)
+    {
+        using namespace std::chrono;
+        write_to_debug_buffer(format("running the unit tests took {} ms",
+                                     duration_cast<milliseconds>(Clock::now() - start_time).count()));
+    }
 
     GlobalScope::instance().options().get_local_option("readonly").set<bool>(flags & ServerFlags::ReadOnly);
 
@@ -668,7 +701,7 @@ int run_server(StringView session, StringView server_init,
 
     {
         Context empty_context{Context::EmptyContextFlag{}};
-        global_scope.hooks().run_hook("KakBegin", session, empty_context);
+        global_scope.hooks().run_hook(Hook::KakBegin, session, empty_context);
     }
 
     if (not files.empty()) try
@@ -733,6 +766,7 @@ int run_server(StringView session, StringView server_init,
             client_manager.clear_client_trash();
             client_manager.clear_window_trash();
             buffer_manager.clear_buffer_trash();
+            global_scope.option_registry().clear_option_trash();
 
             if (local_client and not contains(client_manager, local_client))
                 local_client = nullptr;
@@ -770,7 +804,7 @@ int run_server(StringView session, StringView server_init,
 
     {
         Context empty_context{Context::EmptyContextFlag{}};
-        global_scope.hooks().run_hook("KakEnd", "", empty_context);
+        global_scope.hooks().run_hook(Hook::KakEnd, "", empty_context);
     }
 
     return local_client_exit;
@@ -816,9 +850,11 @@ int run_filter(StringView keystr, ConstArrayView<StringView> files, bool quiet, 
         {
             Buffer* buffer = open_file_buffer(file, Buffer::Flags::NoHooks);
             if (not suffix_backup.empty())
-                write_buffer_to_file(*buffer, buffer->name() + suffix_backup);
+                write_buffer_to_file(*buffer, buffer->name() + suffix_backup,
+                                     WriteMethod::Overwrite, WriteFlags::None);
             apply_to_buffer(*buffer);
-            write_buffer_to_file(*buffer, buffer->name());
+            write_buffer_to_file(*buffer, buffer->name(),
+                                 WriteMethod::Overwrite, WriteFlags::None);
             buffer_manager.delete_buffer(*buffer);
         }
         if (not isatty(0))
@@ -880,6 +916,12 @@ void signal_handler(int signal)
 
     if (signal == SIGTERM)
         exit(-1);
+    else if (signal == SIGSEGV)
+    {
+        // generate core dump
+        ::signal(SIGSEGV, SIG_DFL);
+        ::kill(getpid(), SIGSEGV);
+    }
     else
         abort();
 }
@@ -896,7 +938,7 @@ int main(int argc, char* argv[])
     set_signal_handler(SIGFPE,  signal_handler);
     set_signal_handler(SIGQUIT, signal_handler);
     set_signal_handler(SIGTERM, signal_handler);
-    set_signal_handler(SIGPIPE, SIG_IGN);
+    set_signal_handler(SIGPIPE, [](int){});
     set_signal_handler(SIGINT, [](int){});
     set_signal_handler(SIGCHLD, [](int){});
 
@@ -908,7 +950,7 @@ int main(int argc, char* argv[])
                    { "s", { true,  "set session name" } },
                    { "d", { false, "run as a headless session (requires -s)" } },
                    { "p", { true,  "just send stdin as commands to the given session" } },
-                   { "f", { true,  "act as a filter, executing given keys on given files" } },
+                   { "f", { true,  "filter: for each file, select the entire buffer and execute the given keys" } },
                    { "i", { true, "backup the files on which a filter is applied using the given suffix" } },
                    { "q", { false, "in filter mode, be quiet about errors applying keys" } },
                    { "ui", { true, "set the type of user interface to use (ncurses, dummy, or json)" } },
@@ -1102,3 +1144,17 @@ int main(int argc, char* argv[])
     }
     return 0;
 }
+
+#if defined(__ELF__)
+asm(R"(
+.pushsection ".debug_gdb_scripts", "MS",@progbits,1
+.byte 4
+.ascii "kakoune-inline-gdb.py\n"
+.ascii "import os.path\n"
+.ascii "sys.path.insert(0, os.path.dirname(gdb.current_objfile().filename) + '/../share/kak/gdb/')\n"
+.ascii "import gdb.printing\n"
+.ascii "import kakoune\n"
+.ascii "gdb.printing.register_pretty_printer(gdb.current_objfile(), kakoune.build_pretty_printer())\n"
+.popsection
+)");
+#endif

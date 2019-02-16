@@ -12,31 +12,45 @@ hook global BufCreate .*[.](hbs) %{
 # ‾‾‾‾‾‾‾‾‾‾‾‾
 
 add-highlighter shared/hbs regions
-add-highlighter shared/hbs/html  default-region ref html
-add-highlighter shared/hbs/comment          region -recurse ' ' \{\{!-- --\}\} fill comment
+add-highlighter shared/hbs/comment          region \{\{!-- --\}\} fill comment
 add-highlighter shared/hbs/comment_alt      region \{\{!   \}\}   fill comment
-add-highlighter shared/hbs/block-expression region \{\{    \}\}   group
+add-highlighter shared/hbs/block-expression region \{\{[#/]   \}\}   regions
+add-highlighter shared/hbs/expression 		region \{\{    \}\}   regions
 
-add-highlighter shared/hbs/block-expression/ regex \{\{((#|/|)(\w|-)+) 1:meta
+define-command -hidden add-mutual-highlighters -params 1 %~
+    add-highlighter "shared/hbs/%arg{1}/code" default-region group
+    add-highlighter "shared/hbs/%arg{1}/single-quote" region '"'    (?<!\\)(\\\\)*" fill string
+    add-highlighter "shared/hbs/%arg{1}/double-quote" region "'"    (?<!\\)(\\\\)*' fill string
+    add-highlighter "shared/hbs/%arg{1}/code/variable" regex \b([\w-]+)\b 1:variable
+    add-highlighter "shared/hbs/%arg{1}/code/attribute" regex \b([\w-]+)= 1:attribute
+    add-highlighter "shared/hbs/%arg{1}/code/helper" regex (?:(?:\{\{)|\()([#/]?[\w-]+(?:/[\w-]+)*) 1:keyword
+~
 
-# some hbs tags have a special meaning
-add-highlighter shared/hbs/block-expression/ regex \{\{((#|/|)(if|else|unless|with|lookup|log)) 1:keyword
+add-mutual-highlighters expression
+add-mutual-highlighters block-expression
 
-# 'each' is special as it really is two words 'each' and 'as'
-add-highlighter shared/hbs/block-expression/ regex \{\{((#|/|)((each).*(as))) 2:keyword 4:keyword 5:keyword
+add-highlighter shared/hbs/block-expression/code/yield regex \b(as)\s|[\w-]+|\}\} 1:keyword
 
-add-highlighter shared/hbs/block-expression/ regex ((\w|-)+)= 1:attribute
 
-# highlight the string values of attributes as a bonus
-add-highlighter shared/hbs/block-expression/ regex ((\w|-)+)=(('|").*?('|")) 1:attribute 3:value
+# wrapper around shared/html highlighter.  The shared/hbs highlighter will be
+# added into shared/html when a buffer of filetype 'hbs' is actively displayed in the window.
+add-highlighter shared/hbs-file regions
+add-highlighter shared/hbs-file/html default-region ref html
 
 # Commands
 # ‾‾‾‾‾‾‾‾
 
-define-command -hidden hbs-filter-around-selections %{
+define-command -hidden hbs-trim-indent %{
     # remove trailing white spaces
     try %{ execute-keys -draft -itersel <a-x> s \h+$ <ret> d }
 }
+
+define-command -hidden hbs-indent-on-char %[
+    evaluate-commands -draft -itersel %[
+        # de-indent after closing a yielded block tag
+        try %[ execute-keys -draft <space> <a-h> s ^\h+\{\{/([\w-.]+(?:/[\w-.]+)*)\}\}$ <ret> {c\{\{#<c-r>1,\{\{/<c-r>1\}\} <ret> s \A|.\z <ret> 1<a-&> ]
+    ]
+]
 
 define-command -hidden hbs-indent-on-new-line %{
     evaluate-commands -draft -itersel %{
@@ -45,7 +59,7 @@ define-command -hidden hbs-indent-on-new-line %{
         # preserve previous line indent
         try %{ execute-keys -draft \; K <a-&> }
         # filter previous line
-        try %{ execute-keys -draft k : hbs-filter-around-selections <ret> }
+        try %{ execute-keys -draft k : hbs-trim-indent <ret> }
         # indent after lines beginning with : or -
         try %{ execute-keys -draft k <a-x> <a-k> ^\h*[:-] <ret> j <a-gt> }
     }
@@ -54,20 +68,30 @@ define-command -hidden hbs-indent-on-new-line %{
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
+declare-option bool hbs_highlighters_enabled false
+
+define-command -hidden maybe-add-hbs-to-html %{ evaluate-commands %sh{
+    if [ "$kak_opt_hbs_highlighters_enabled" == "false" ]; then
+        printf %s "
+            add-highlighter shared/html/hbs region '\{\{' '\}\}' ref hbs
+            add-highlighter shared/html/tag/hbs region '\{\{' '\}\}' ref hbs
+            set-option global hbs_highlighters_enabled true
+        "
+    fi
+} }
+
 hook -group hbs-highlight global WinSetOption filetype=hbs %{
-    add-highlighter window/hbs ref hbs
+    maybe-add-hbs-to-html
+    add-highlighter window/hbs-file ref hbs-file
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/hbs-file }
 }
 
 hook global WinSetOption filetype=hbs %{
-    hook window ModeChange insert:.* -group hbs-hooks  hbs-filter-around-selections
+    hook window ModeChange insert:.* -group hbs-trim-indent hbs-trim-indent
     hook window InsertChar \n -group hbs-indent hbs-indent-on-new-line
-}
+    hook window InsertChar .* -group hbs-indent hbs-indent-on-char
+    hook window InsertChar '>' -group hbs-indent html-indent-on-greater-than
+    hook window InsertChar \n -group hbs-indent html-indent-on-new-line
 
-hook -group hbs-highlight global WinSetOption filetype=(?!hbs).* %{
-    remove-highlighter window/hbs
-}
-
-hook global WinSetOption filetype=(?!hbs).* %{
-    remove-hooks window hbs-indent
-    remove-hooks window hbs-hooks
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window hbs-.+ }
 }

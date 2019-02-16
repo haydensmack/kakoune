@@ -26,33 +26,49 @@ add-highlighter shared/lisp/code/ regex (\b\d+)?\.\d+([eEsSfFdDlL]\d+)?\b 0:valu
 # Commands
 # ‾‾‾‾‾‾‾‾
 
-define-command -hidden lisp-filter-around-selections %{
+define-command -hidden lisp-trim-indent %{
     # remove trailing white spaces
     try %{ execute-keys -draft -itersel <a-x> s \h+$ <ret> d }
 }
 
+declare-option \
+    -docstring 'regex matching the head of forms which have options *and* indented bodies' \
+    regex lisp_special_indent_forms \
+    '(?:def.*|if(-.*|)|let.*|lambda|with-.*|when(-.*|))'
+
 define-command -hidden lisp-indent-on-new-line %{
-    evaluate-commands -draft -itersel %{
-        # preserve previous line indent
-        try %{ execute-keys -draft \; K <a-&> }
-        # indent when matches opening paren
-        try %{ execute-keys -draft [( <a-k> \A\([^\n]+\n[^\n]*\n?\z <ret> <a-\;> \; <a-gt> }
+    # registers: i = best align point so far; w = start of first word of form
+    evaluate-commands -draft -save-regs '/"|^@iw' -itersel %{
+        execute-keys -draft 'gk"iZ'
+        try %{
+            execute-keys -draft '[bl"i<a-Z><gt>"wZ'
+
+            try %{
+                # If a special form, indent another (indentwidth - 1) spaces
+                execute-keys -draft '"wze<a-k>\A' %opt{lisp_special_indent_forms} '\z<ret>'
+                execute-keys -draft '"wze<a-L>s.{' %sh{printf $(( kak_opt_indentwidth - 1 ))} '}\K.*<ret><a-;>;"i<a-Z><gt>'
+            } catch %{
+                # If not "special" form and parameter appears on line 1, indent to parameter
+                execute-keys -draft '"wze<a-l>s\h\K[^\s].*<ret><a-;>;"i<a-Z><gt>'
+            }
+        }
+        try %{ execute-keys -draft '[rl"i<a-Z><gt>' }
+        try %{ execute-keys -draft '[Bl"i<a-Z><gt>' }
+        execute-keys -draft ';"i<a-z>a&<space>'
     }
 }
 
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group lisp-highlight global WinSetOption filetype=lisp %{ add-highlighter window/lisp ref lisp }
-
-hook global WinSetOption filetype=lisp %{
-    hook window ModeChange insert:.* -group lisp-hooks  lisp-filter-around-selections
-    hook window InsertChar \n -group lisp-indent lisp-indent-on-new-line
+hook -group lisp-highlight global WinSetOption filetype=lisp %{
+    add-highlighter window/lisp ref lisp
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/lisp }
 }
 
-hook -group lisp-highlight global WinSetOption filetype=(?!lisp).* %{ remove-highlighter window/lisp }
+hook global WinSetOption filetype=lisp %{
+    hook window ModeChange insert:.* -group lisp-trim-indent  lisp-trim-indent
+    hook window InsertChar \n -group lisp-indent lisp-indent-on-new-line
 
-hook global WinSetOption filetype=(?!lisp).* %{
-    remove-hooks window lisp-indent
-    remove-hooks window lisp-hooks
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window lisp-.+ }
 }

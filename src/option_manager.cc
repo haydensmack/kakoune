@@ -2,6 +2,7 @@
 
 #include "assert.hh"
 #include "flags.hh"
+#include "scope.hh"
 
 namespace Kakoune
 {
@@ -80,10 +81,15 @@ const Option& OptionManager::operator[](StringView name) const
 void OptionManager::unset_option(StringView name)
 {
     kak_assert(m_parent); // cannot unset option on global manager
-    if (m_options.contains(name))
+    auto it = m_options.find(name);
+    if (it != m_options.end())
     {
+        auto& parent_option = (*m_parent)[name];
+        const bool changed = not parent_option.has_same_value(*it->value);
+        GlobalScope::instance().option_registry().move_to_trash(std::move(it->value));
         m_options.erase(name);
-        on_option_changed((*m_parent)[name]);
+        if (changed)
+            on_option_changed(parent_option);
     }
 }
 

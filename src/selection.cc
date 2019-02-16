@@ -50,6 +50,12 @@ void SelectionList::set(Vector<Selection> list, size_t main)
     check_invariant();
 }
 
+bool compare_selections(const Selection& lhs, const Selection& rhs)
+{
+    const auto lmin = lhs.min(), rmin = rhs.min();
+    return lmin == rmin ? lhs.max() < rhs.max() : lmin < rmin;
+}
+
 namespace
 {
 
@@ -77,12 +83,6 @@ BufferCoord update_erase(BufferCoord coord, BufferCoord begin, BufferCoord end)
     kak_assert(coord.line >= 0 and coord.column >= 0);
     return coord;
 } */
-
-bool compare_selections(const Selection& lhs, const Selection& rhs)
-{
-    const auto lmin = lhs.min(), rmin = rhs.min();
-    return lmin == rmin ? lhs.max() < rhs.max() : lmin < rmin;
-}
 
 template<typename Iterator, typename OverlapsFunc>
 Iterator merge_overlapping(Iterator begin, Iterator end, size_t& main, OverlapsFunc overlaps)
@@ -409,8 +409,12 @@ void SelectionList::insert(ConstArrayView<String> strings, InsertMode mode,
         const String& str = strings[std::min(index, strings.size()-1)];
 
         const auto pos = (mode == InsertMode::Replace) ?
-            replace(*m_buffer, sel, str)
-          : m_buffer->insert(changes_tracker.get_new_coord(insert_pos[index]), str);
+            sel.min() : changes_tracker.get_new_coord(insert_pos[index]);
+
+        if (mode == InsertMode::Replace)
+            replace(*m_buffer, sel, str);
+        else
+            m_buffer->insert(pos, str);
 
         size_t old_timestamp = m_timestamp;
         changes_tracker.update(*m_buffer, m_timestamp);

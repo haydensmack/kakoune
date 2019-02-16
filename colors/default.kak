@@ -27,12 +27,12 @@ face global list yellow
 
 # builtin faces
 face global Default default,default
-face global PrimarySelection white,blue
-face global SecondarySelection black,blue
-face global PrimaryCursor black,white
-face global SecondaryCursor black,white
-face global PrimaryCursorEol black,cyan
-face global SecondaryCursorEol black,cyan
+face global PrimarySelection white,blue+fg
+face global SecondarySelection black,blue+fg
+face global PrimaryCursor black,white+fg
+face global SecondaryCursor black,white+fg
+face global PrimaryCursorEol black,cyan+fg
+face global SecondaryCursorEol black,cyan+fg
 face global LineNumbers default,default
 face global LineNumberCursor default,default+r
 face global MenuForeground white,blue
@@ -47,4 +47,5 @@ face global StatusLineValue green,default
 face global StatusCursor black,cyan
 face global Prompt yellow,default
 face global MatchingChar default,default+b
+face global Whitespace default,default+f
 face global BufferPadding blue,default

@@ -1,7 +1,7 @@
 # Detection
 # ‾‾‾‾‾‾‾‾‾
 
-hook global BufCreate .*/?[mM]akefile %{
+hook global BufCreate .*(/?[mM]akefile|\.mk) %{
     set-option buffer filetype makefile
 }
 
@@ -49,14 +49,12 @@ define-command -hidden makefile-indent-on-new-line %{
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group makefile-highlight global WinSetOption filetype=makefile %{ add-highlighter window/makefile ref makefile }
+hook -group makefile-highlight global WinSetOption filetype=makefile %{
+    add-highlighter window/makefile ref makefile
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/makefile }
+}
 
 hook global WinSetOption filetype=makefile %{
     hook window InsertChar \n -group makefile-indent makefile-indent-on-new-line
-}
-
-hook -group makefile-highlight global WinSetOption filetype=(?!makefile).* %{ remove-highlighter window/makefile }
-
-hook global WinSetOption filetype=(?!makefile).* %{
-    remove-hooks window makefile-indent
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window makefile-.+ }
 }

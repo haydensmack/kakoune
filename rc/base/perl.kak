@@ -4,7 +4,7 @@
 # Detection
 # ‾‾‾‾‾‾‾‾‾
 
-hook global BufCreate .*\.p[lm] %{
+hook global BufCreate .*\.(t|p[lm])$ %{
     set-option buffer filetype perl
 }
 
@@ -98,19 +98,17 @@ define-command -hidden perl-indent-on-closing-curly-brace %[
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group perl-highlight global WinSetOption filetype=perl %{ add-highlighter window/perl ref perl }
+hook -group perl-highlight global WinSetOption filetype=perl %{
+    add-highlighter window/perl ref perl
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/perl }
+}
 
 hook global WinSetOption filetype=perl %{
     # cleanup trailing whitespaces when exiting insert mode
-    hook window ModeChange insert:.* -group perl-hooks %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
+    hook window ModeChange insert:.* -group perl-trim-indent %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
     hook window InsertChar \n -group perl-indent perl-indent-on-new-line
     hook window InsertChar \{ -group perl-indent perl-indent-on-opening-curly-brace
     hook window InsertChar \} -group perl-indent perl-indent-on-closing-curly-brace
-}
 
-hook -group perl-highlight global WinSetOption filetype=(?!perl).* %{ remove-highlighter window/perl }
-
-hook global WinSetOption filetype=(?!perl).* %{
-    remove-hooks window perl-hooks
-    remove-hooks window perl-indent
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window perl-.+ }
 }

@@ -100,7 +100,6 @@ inline BufferCoord Buffer::end_coord() const
 
 inline BufferIterator::BufferIterator(const Buffer& buffer, BufferCoord coord) noexcept
     : m_buffer{&buffer}, m_coord{coord},
-      m_line_count{buffer.line_count()},
       m_line{coord.line < buffer.line_count() ? (*m_buffer)[coord.line] : StringView{}} {}
 
 inline bool BufferIterator::operator==(const BufferIterator& iterator) const noexcept
@@ -135,6 +134,16 @@ inline bool BufferIterator::operator>=(const BufferIterator& iterator) const noe
 {
     kak_assert(m_buffer == iterator.m_buffer);
     return (m_coord >= iterator.m_coord);
+}
+
+inline bool BufferIterator::operator==(const BufferCoord& coord) const noexcept
+{
+    return m_coord == coord;
+}
+
+inline bool BufferIterator::operator!=(const BufferCoord& coord) const noexcept
+{
+    return m_coord != coord;
 }
 
 [[gnu::always_inline]]
@@ -183,7 +192,7 @@ inline BufferIterator& BufferIterator::operator++()
 {
     if (++m_coord.column == m_line.length())
     {
-        m_line = (++m_coord.line < m_line_count) ?
+        m_line = (++m_coord.line < m_buffer->line_count()) ?
             (*m_buffer)[m_coord.line] : StringView{};
         m_coord.column = 0;
     }

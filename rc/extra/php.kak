@@ -48,7 +48,7 @@ add-highlighter shared/php-file/php  region '<\?(php)?'     '\?>'      ref php
 # Commands
 # ‾‾‾‾‾‾‾‾
 
-define-command -hidden php-filter-around-selections %{
+define-command -hidden php-trim-indent %{
     # remove trailing white spaces
     try %{ execute-keys -draft -itersel <a-x> s \h+$ <ret> d }
 }
@@ -67,7 +67,7 @@ define-command -hidden php-indent-on-new-line %<
         # preserve previous line indent
         try %{ execute-keys -draft \; K <a-&> }
         # filter previous line
-        try %{ execute-keys -draft k : php-filter-around-selections <ret> }
+        try %{ execute-keys -draft k : php-trim-indent <ret> }
         # indent after lines beginning / ending with opener token
         try %_ execute-keys -draft k <a-x> <a-k> ^\h*[[{]|[[{]$ <ret> j <a-gt> _
     >
@@ -76,17 +76,15 @@ define-command -hidden php-indent-on-new-line %<
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group php-highlight global WinSetOption filetype=php %{ add-highlighter window/php-file ref php-file }
-
-hook global WinSetOption filetype=php %{
-    hook window ModeChange insert:.* -group php-hooks  php-filter-around-selections
-    hook window InsertChar .* -group php-indent php-indent-on-char
-    hook window InsertChar \n -group php-indent php-indent-on-new-line
+hook -group php-highlight global WinSetOption filetype=php %{
+    add-highlighter window/php-file ref php-file
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/php-file }
 }
 
-hook -group php-highlight global WinSetOption filetype=(?!php).* %{ remove-highlighter window/php-file }
+hook global WinSetOption filetype=php %{
+    hook window ModeChange insert:.* -group php-trim-indent  php-trim-indent
+    hook window InsertChar .* -group php-indent php-indent-on-char
+    hook window InsertChar \n -group php-indent php-indent-on-new-line
 
-hook global WinSetOption filetype=(?!php).* %{
-    remove-hooks window php-indent
-    remove-hooks window php-hooks
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window php-.+ }
 }

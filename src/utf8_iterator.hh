@@ -14,18 +14,23 @@ namespace utf8
 // adapter for an iterator on bytes which permits to iterate
 // on unicode codepoints instead.
 template<typename BaseIt,
+         typename Sentinel = BaseIt,
          typename CodepointType = Codepoint,
          typename DifferenceType = CharCount,
          typename InvalidPolicy = utf8::InvalidPolicy::Pass>
-class iterator : public std::iterator<std::bidirectional_iterator_tag,
-                                      CodepointType, DifferenceType,
-                                      CodepointType*, CodepointType>
+class iterator
 {
 public:
+    using value_type = CodepointType;
+    using difference_type = DifferenceType;
+    using pointer = CodepointType*;
+    using reference = CodepointType&;
+    using iterator_category = std::bidirectional_iterator_tag;
+
     iterator() = default;
     constexpr static bool noexcept_policy = noexcept(InvalidPolicy{}(0));
 
-    iterator(BaseIt it, BaseIt begin, BaseIt end) noexcept
+    iterator(BaseIt it, Sentinel begin, Sentinel end) noexcept
         : m_it{std::move(it)}, m_begin{std::move(begin)}, m_end{std::move(end)}
     {}
 
@@ -37,7 +42,6 @@ public:
     iterator& operator++() noexcept
     {
         utf8::to_next(m_it, m_end);
-        invalidate_value();
         return *this;
     }
 
@@ -51,7 +55,6 @@ public:
     iterator& operator--() noexcept
     {
         utf8::to_previous(m_it, m_begin);
-        invalidate_value();
         return *this;
     }
 
@@ -105,8 +108,13 @@ public:
     bool operator> (const iterator& other) const noexcept { return m_it > other.m_it; }
     bool operator>= (const iterator& other) const noexcept { return m_it >= other.m_it; }
 
-    bool operator==(const BaseIt& other) const noexcept { return m_it == other; }
-    bool operator!=(const BaseIt& other) const noexcept { return m_it != other; }
+    template<typename T>
+    std::enable_if_t<std::is_same<T, BaseIt>::value or std::is_same<T, Sentinel>::value, bool>
+    operator==(const T& other) const noexcept { return m_it == other; }
+
+    template<typename T>
+    std::enable_if_t<std::is_same<T, BaseIt>::value or std::is_same<T, Sentinel>::value, bool>
+    operator!=(const T& other) const noexcept { return m_it != other; }
 
     bool operator< (const BaseIt& other) const noexcept { return m_it < other; }
     bool operator<= (const BaseIt& other) const noexcept { return m_it <= other; }
@@ -121,24 +129,20 @@ public:
 
     CodepointType operator*() const noexcept(noexcept_policy)
     {
-        return get_value();
+        return (CodepointType)utf8::codepoint<InvalidPolicy>(m_it, m_end);
     }
 
-    const BaseIt& base() const noexcept(noexcept_policy) { return m_it; }
+    CodepointType read() noexcept(noexcept_policy)
+    {
+        return (CodepointType)utf8::read_codepoint<InvalidPolicy>(m_it, m_end);
+    }
+
+    const BaseIt& base() const noexcept { return m_it; }
 
 private:
-    void invalidate_value() noexcept { m_value = -1; }
-    CodepointType get_value() const noexcept(noexcept_policy)
-    {
-        if (m_value == (CodepointType)-1)
-            m_value = (CodepointType)utf8::codepoint<InvalidPolicy>(m_it, m_end);
-        return m_value;
-    }
-
     BaseIt m_it;
-    BaseIt m_begin;
-    BaseIt m_end;
-    mutable CodepointType m_value = -1;
+    Sentinel m_begin;
+    Sentinel m_end;
 };
 
 }

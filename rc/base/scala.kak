@@ -33,7 +33,7 @@ add-highlighter shared/scala/code/ regex (\[|\]|=>|<:|:>|=:=|::|&&|\|\|) 0:opera
 # Commands
 # ‾‾‾‾‾‾‾‾
 
-define-command -hidden scala-filter-around-selections %{
+define-command -hidden scala-trim-indent %{
     # remove trailing white spaces
     try %{ execute-keys -draft -itersel <a-x> s \h+$ <ret> d }
 }
@@ -45,7 +45,7 @@ define-command -hidden scala-indent-on-new-line %[
         # preserve previous line indent
         try %[ execute-keys -draft \; K <a-&> ]
         # filter previous line
-        try %[ execute-keys -draft k : scala-filter-around-selections <ret> ]
+        try %[ execute-keys -draft k : scala-trim-indent <ret> ]
         # indent after lines ending with {
         try %[ execute-keys -draft k <a-x> <a-k> \{$ <ret> j <a-gt> ]
     ]
@@ -61,17 +61,15 @@ define-command -hidden scala-indent-on-closing-curly-brace %[
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group scala-highlight global WinSetOption filetype=scala %{ add-highlighter window/scala ref scala }
+hook -group scala-highlight global WinSetOption filetype=scala %{
+    add-highlighter window/scala ref scala
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/scala }
+}
 
 hook global WinSetOption filetype=scala %[
-    hook window ModeChange insert:.* -group scala-hooks  scala-filter-around-selections
+    hook window ModeChange insert:.* -group scala-trim-indent  scala-trim-indent
     hook window InsertChar \n -group scala-indent scala-indent-on-new-line
     hook window InsertChar \} -group scala-indent scala-indent-on-closing-curly-brace
+
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window scala-.+ }
 ]
-
-hook -group scala-highlight global WinSetOption filetype=(?!scala).* %{ remove-highlighter window/scala }
-
-hook global WinSetOption filetype=(?!scala).* %{
-    remove-hooks window scala-indent
-    remove-hooks window scala-hooks
-}

@@ -59,13 +59,15 @@ define-command doc-jump-to-anchor -params 1 %{
     evaluate-commands %sh{
         anchor="$1"
         eval "set -- $kak_opt_doc_anchors"
+
+        shift
         for range in "$@"; do
-            if [ "${range#*|}" == "$anchor" ]; then
+            if [ "${range#*|}" = "$anchor" ]; then
                 printf '%s\n'  "select '${range%|*}'; execute-keys vv"
                 exit
             fi
         done
-        printf '%s\n' "echo -markup %{{Error}No such anchor '$1'}"
+        printf "echo -markup {Error}No such anchor '%s'" "${anchor}"
     }
 }
 
@@ -102,7 +104,10 @@ define-command -params 1 -hidden doc-render %{
     doc-parse-anchors
 
     # Join paragraphs together
-    try %{ execute-keys -draft \%S \n{2,}|(?<=\+)\n|^[^\n]+::\n|\n\h*[-*] <ret> <a-K>^-{2,}(\n|\z)<ret> S\n\z<ret> <a-k>\n<ret> <a-j> }
+    try %{
+        execute-keys -draft '%S\n{2,}|(?<=\+)\n|^[^\n]+::\n|^\h*[*-]\h+<ret>' \
+            <a-K>^\h*-{2,}(\n|\z)<ret> S\n\z<ret> <a-k>\n<ret> <a-j>
+    }
 
     # Remove some line end markers
     try %{ execute-keys -draft \%s \h*(\+|:{2,})$ <ret> d }
@@ -114,7 +119,7 @@ define-command -params 1 -hidden doc-render %{
     doc-render-regex \B(?<!\\)`(?=\S)[^\n]+?(?<=\S)(?<!\\)`\B \A|.\z 'H' mono
     doc-render-regex ^=\h+[^\n]+ ^=\h+ '~' title
     doc-render-regex ^={2,}\h+[^\n]+ ^={2,}\h+ '' header
-    doc-render-regex ^-{2,}\n.*?^-{2,}\n ^-{2,}\n '' block
+    doc-render-regex ^\h*-{2,}\n\h*.*?^\h*-{2,}\n ^\h*-{2,}\n '' block
 
     doc-parse-links
 
@@ -125,11 +130,11 @@ define-command -params 1 -hidden doc-render %{
     add-highlighter buffer/ ranges doc_render_ranges
     add-highlighter buffer/ ranges doc_render_links
     add-highlighter buffer/ wrap -word -indent
-    map buffer normal <ret> :doc-follow-link<ret>
+    map buffer normal <ret> ': doc-follow-link<ret>'
 }
 
 define-command -params 1..2 \
-    -shell-candidates %{
+    -shell-script-candidates %{
         if [ "$kak_token_to_complete" -eq 0 ]; then
             find "${kak_runtime}/doc/" -type f -name "*.asciidoc" | sed 's,.*/,,; s/\.[^/]*$//'
         elif [ "$kak_token_to_complete" -eq 1 ]; then

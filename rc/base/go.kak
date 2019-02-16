@@ -81,19 +81,17 @@ define-command -hidden go-indent-on-closing-curly-brace %[
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group go-highlight global WinSetOption filetype=go %{ add-highlighter window/go ref go }
+hook -group go-highlight global WinSetOption filetype=go %{
+    add-highlighter window/go ref go
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/go }
+}
 
 hook global WinSetOption filetype=go %{
     # cleanup trailing whitespaces when exiting insert mode
-    hook window ModeChange insert:.* -group go-hooks %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
+    hook window ModeChange insert:.* -group go-trim-indent %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
     hook window InsertChar \n -group go-indent go-indent-on-new-line
     hook window InsertChar \{ -group go-indent go-indent-on-opening-curly-brace
     hook window InsertChar \} -group go-indent go-indent-on-closing-curly-brace
-}
 
-hook -group go-highlight global WinSetOption filetype=(?!go).* %{ remove-highlighter window/go }
-
-hook global WinSetOption filetype=(?!go).* %{
-    remove-hooks window go-hooks
-    remove-hooks window go-indent
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window go-.+ }
 }

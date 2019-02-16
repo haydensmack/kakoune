@@ -11,7 +11,7 @@
 #include "string_utils.hh"
 
 #include <memory>
-#include <type_traits>
+#include <utility>
 
 namespace Kakoune
 {
@@ -58,6 +58,8 @@ public:
     virtual void set_from_strings(ConstArrayView<String> strs) = 0;
     virtual void add_from_strings(ConstArrayView<String> strs) = 0;
     virtual void update(const Context& context) = 0;
+
+    virtual bool has_same_value(const Option& other) const = 0;
 
     virtual Option* clone(OptionManager& manager) const = 0;
     OptionManager& manager() const { return m_manager; }
@@ -167,6 +169,11 @@ public:
     {
         option_update(m_value, context);
     }
+
+    bool has_same_value(const Option& other) const override
+    {
+        return other.is_of_type<T>() and other.get<T>() == m_value;
+    }
 private:
     virtual void validate(const T& value) const {}
     T m_value;
@@ -256,9 +263,13 @@ public:
     bool option_exists(StringView name) const { return option_desc(name) != nullptr; }
 
     CandidateList complete_option_name(StringView prefix, ByteCount cursor_pos) const;
+
+    void clear_option_trash() { m_option_trash.clear(); }
+    void move_to_trash(std::unique_ptr<Option>&& option) { m_option_trash.push_back(std::move(option)); }
 private:
     OptionManager& m_global_manager;
     Vector<std::unique_ptr<const OptionDesc>, MemoryDomain::Options> m_descs;
+    Vector<std::unique_ptr<Option>> m_option_trash;
 };
 
 }

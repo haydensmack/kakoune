@@ -46,12 +46,12 @@ evaluate-commands %sh{
 
         # builtin
         face global Default            ${base0},${base03}
-        face global PrimarySelection   ${base03},${blue}
-        face global SecondarySelection ${base01},${base1}
-        face global PrimaryCursor      ${base03},${base0}
-        face global SecondaryCursor    ${base03},${base01}
-        face global PrimaryCursorEol   ${base03},${base2}
-        face global SecondaryCursorEol ${base03},${base3}
+        face global PrimarySelection   ${base03},${blue}+fg
+        face global SecondarySelection ${base01},${base1}+fg
+        face global PrimaryCursor      ${base03},${base0}+fg
+        face global SecondaryCursor    ${base03},${base01}+fg
+        face global PrimaryCursorEol   ${base03},${base2}+fg
+        face global SecondaryCursorEol ${base03},${base3}+fg
         face global LineNumbers        ${base01},${base02}
         face global LineNumberCursor   ${base1},${base02}
         face global LineNumbersWrapped ${base02},${base02}
@@ -68,5 +68,6 @@ evaluate-commands %sh{
         face global Prompt             ${yellow}+b
         face global MatchingChar       ${red},${base01}+b
         face global BufferPadding      ${base01},${base03}
+        face global Whitespace         ${base01}+f
     "
 }

@@ -33,9 +33,19 @@ fg_color[,bg_color][+attributes]
             dim
         *i*:::
             italic
-        *e*:::
-            exclusive, override previous faces instead of merging
-            with them
+        *F*:::
+            final, override the previous face instead of merging with it
+            an will only be replaced if another face with the final
+            attribute is applied
+        *f*:::
+            final foreground, as final but only applies to face's
+            foreground color
+        *g*:::
+            final background, as final but only applies to face's
+            background color
+        *a*:::
+            final attributes, as final but only applies to face's
+            attributes
 
 == Builtin faces
 
@@ -97,12 +107,12 @@ areas of the user interface:
     face used prompt displayed on the status line
 
 *BufferPadding*::
-    face applied on the characters that follow the last line of a buffer
+    face applied on the `~` characters that follow the last line of a buffer
 
 === Builtin highlighters faces
 
 The following faces are used by builtin highlighters if enabled.
-(See <<highlighters#,`:doc highlighters`>>.
+(See <<highlighters#,`:doc highlighters`>>).
 
 *LineNumbers*::
     face used by the `number-lines` highlighter
@@ -118,3 +128,21 @@ The following faces are used by builtin highlighters if enabled.
 
 *Whitespace*::
     face used by the `show-whitespaces` highlighter
+
+== Markup strings
+
+In certain contexts, Kakoune can take a markup string, which is a string
+containing formatting informations. In these strings, the {facename}
+syntax will enable the face facename until another face gets activated,
+or the end of the string is reached.
+
+For example, the following command displays the text "default" in the
+Default face, and "error" in the Error face:
+
+----
+echo -markup 'default {Error}error{Default} default'
+----
+
+Inside a markup string, a literal `{` character is written `\{`, and a
+literal backslash (`\`) that precedes a '{' character is escaped as well
+(`\\`).

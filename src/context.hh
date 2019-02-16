@@ -5,6 +5,8 @@
 #include "optional.hh"
 #include "utils.hh"
 
+#include <functional>
+
 namespace Kakoune
 {
 
@@ -134,6 +136,7 @@ private:
     void begin_edition();
     void end_edition();
     int m_edition_level = 0;
+    size_t m_edition_timestamp = 0;
 
     friend struct ScopedEdition;
 

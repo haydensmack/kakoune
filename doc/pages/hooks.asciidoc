@@ -5,22 +5,21 @@
 Commands can be registered to be executed when certain events arise. To
 register a hook use the following command:
 
-----------------------------------------------------------------------
-hook [-group <group>] <scope> <hook_name> <filtering_regex> <commands>
-----------------------------------------------------------------------
+------------------------------------------------------------------------------
+hook [-group <group> | -once] <scope> <hook_name> <filtering_regex> <commands>
+------------------------------------------------------------------------------
 
 *scope* can be one of *global*, *buffer* or *window* (See
 <<scopes#,`:doc scopes`>>).
 
+*hook_name* must be one of the hook names in the list below, like `InsertKey`
+or `BufSetOption`.
+
+*filtering_regex* must match the entire parameter string in order for the
+commands to be executed.
+
 *command* is a string containing the commands to execute when the hook
 is called.
-
-For example to automatically use line numbering with .cc files, use the
-following command:
-
---------------------------------------------------------------
-hook global WinCreate .*\.cc %{ add-highlighter number-lines }
---------------------------------------------------------------
 
 If *group* is given, make this hook part of the named group. Groups are used
 for removing hooks with the following command:
@@ -29,12 +28,22 @@ for removing hooks with the following command:
 remove-hooks <scope> <group>
 ----------------------------
 
-A call to the command above will remove every hooks in *scope* that are part
-of the given *group*.
+A call to the command above will remove every hook in *scope* whose group
+matches the given *group* regex.
 
-Hooks declared with the `-once` switch are automatically removed after running.
+If `-once` is given, the hook is automatically removed after running.
+
+For example to automatically use line numbering with .cc files, use the
+following command:
+
+--------------------------------------------------------------
+hook global WinCreate .*\.cc %{ add-highlighter number-lines }
+--------------------------------------------------------------
 
 == Default hooks
+
+The parameter string associated with each hook is described after the hook
+name. Hooks with no description will always use an empty string.
 
 *NormalIdle*::
     a certain duration has passed since last key was pressed in normal mode
@@ -73,19 +82,23 @@ Hooks declared with the `-once` switch are automatically removed after running.
     a certain duration has passed since last key was pressed in prompt mode
 
 *WinCreate* `buffer name`::
-    a window was created
+    a window was created. This hook is executed in draft context, so any a
+    changes to selections or input state will be discarded.
 
 *WinClose* `buffer name`::
-    a window was destroyed
+    a window was destroyed. This hook is executed in a draft context, so any
+    changes to selections or input state will be discarded.
 
 *WinResize* `<line>.<column>`::
-    a window was resized
+    a window was resized. This hook is executed in a draft context, so any
+    changes to selections or input state will be discarded.
 
 *WinDisplay* `buffer name`::
-    a window was bound a client
+    a client switched to displaying the given buffer.
 
 *WinSetOption* `<option_name>=<new_value>`::
-    an option was set in a window context
+    an option was set in a window context. This hook is executed in a draft
+    acontext, so any changes to selections or input state will be discarded.
 
 *GlobalSetOption* `<option_name>=<new_value>`::
     an option was set at the global scope
@@ -118,9 +131,10 @@ Hooks declared with the `-once` switch are automatically removed after running.
 *BufOpenFifo* `buffer name`::
     executed when a buffer opens a fifo
 
-*BufReadFifo* `buffer name`::
+*BufReadFifo* `<start line>.<start column>,<end line>.<end column>`::
     executed after some data has been read from a fifo and inserted in
-    the buffer
+    the buffer. The hook param contains the range of text that was just
+    inserted, in a format compatible with the `select` command.
 
 *BufCloseFifo*::
     executed when a fifo buffer closes its fifo file descriptor either
@@ -159,9 +173,8 @@ Hooks declared with the `-once` switch are automatically removed after running.
 *RawKey* `key`::
     Triggered whenever a key is pressed by the user
 
-When not specified, the filtering text is an empty string. Note that
-some hooks will not consider underlying scopes depending on what context
-they are bound to be run into, e.g. the `BufWritePost` hook is a buffer
+Note that some hooks will not consider underlying scopes depending on what
+context they are bound to be run into, e.g. the `BufWritePost` hook is a buffer
 hook, and will not consider the `window` scope.
 
 While defining hook commands with a `%sh{}` block, some additional env

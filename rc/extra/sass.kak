@@ -27,7 +27,7 @@ add-highlighter shared/sass/code/ regex !important 0:keyword
 # Commands
 # ‾‾‾‾‾‾‾‾
 
-define-command -hidden sass-filter-around-selections %{
+define-command -hidden sass-trim-indent %{
     # remove trailing white spaces
     try %{ execute-keys -draft -itersel <a-x> s \h+$ <ret> d }
 }
@@ -39,7 +39,7 @@ define-command -hidden sass-indent-on-new-line %{
         # preserve previous line indent
         try %{ execute-keys -draft \; K <a-&> }
         # filter previous line
-        try %{ execute-keys -draft k : sass-filter-around-selections <ret> }
+        try %{ execute-keys -draft k : sass-trim-indent <ret> }
         # avoid indent after properties and comments
         try %{ execute-keys -draft k <a-x> <a-K> [:/] <ret> j <a-gt> }
     }
@@ -48,17 +48,15 @@ define-command -hidden sass-indent-on-new-line %{
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group sass-highlight global WinSetOption filetype=sass %{ add-highlighter window/sass ref sass }
-
-hook global WinSetOption filetype=sass %{
-    hook window ModeChange insert:.* -group sass-hooks  sass-filter-around-selections
-    hook window InsertChar \n -group sass-indent sass-indent-on-new-line
-    set-option buffer extra_word_chars '-'
+hook -group sass-highlight global WinSetOption filetype=sass %{
+    add-highlighter window/sass ref sass
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/sass }
 }
 
-hook -group sass-highlight global WinSetOption filetype=(?!sass).* %{ remove-highlighter window/sass }
+hook global WinSetOption filetype=sass %{
+    hook window ModeChange insert:.* -group sass-trim-indent  sass-trim-indent
+    hook window InsertChar \n -group sass-indent sass-indent-on-new-line
+    set-option buffer extra_word_chars '_' '-'
 
-hook global WinSetOption filetype=(?!sass).* %{
-    remove-hooks window sass-indent
-    remove-hooks window sass-hooks
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window sass-.+ }
 }

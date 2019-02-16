@@ -3,6 +3,45 @@
 This changelog contains major and/or breaking changes to Kakoune between
 released versions.
 
+== Kakoune 2019.01.20
+
+* `auto_complete` has been renamed to `autocomplete` for more
+  consistency.
+
+* Start of a builtin key parser in the ncurses ui bypassing
+  the ncurses one. Can be favored by setting the ui option 
+  `ncurses_builtin_key_parser` to `true`.
+
+* Right clicks extend the current selection, the control modifier allows
+  merging all the selections after extension.
+
+* The `regex` highlighter now supports named capture groups to
+  ease readability.
+
+== Kakoune 2018.10.27
+
+* `remove-hooks` <group> argument is now a regex and removes all
+  hooks whose group matches it.
+
+* `exclusive` face attribute (e) has been replaced with more
+  granular `final foreground` (f), `final background` (g), and `final
+  attributes` (a), or the three combined as `final` (F).  Semantics
+  changed slightly as those attributes apply to the existing face as
+  well (a final face will not get modified by a following face if that
+  following face does not have the final attribute itself.
+
+* `<a-m>` aka "merge consecutive selections" has been moved to `<a-_>`.
+  The new `<a-m>` and `<a-M>` are now symmetrical with `m` and `M`.
+  Those commands select (or extend) to the matching char backwards.
+
+* `define-command` switches `-shell-completion` and `-shell-candidates`
+  have been renamed to `-shell-script-completion` and
+  `-shell-script-candidates` to make way for a new `-shell-completion`
+  which completes like the shell (shell command name then filename).
+
+* `asciidoc` is not a dependency anymore, the last file that requiered
+  it (Kakoune's manpage) has been converted to troff format.
+
 == Kakoune 2018.09.04
 
 This version contains a significant overhaul of various Kakoune

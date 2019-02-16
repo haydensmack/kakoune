@@ -257,7 +257,7 @@ void write(int fd, StringView data)
     }
 }
 
-void write_buffer_to_fd(Buffer& buffer, int fd, bool sync)
+void write_buffer_to_fd(Buffer& buffer, int fd)
 {
     auto eolformat = buffer.options()["eolformat"].get<EolFormat>();
     StringView eoldata;
@@ -278,39 +278,65 @@ void write_buffer_to_fd(Buffer& buffer, int fd, bool sync)
         write(fd, linedata.substr(0, linedata.length()-1));
         write(fd, eoldata);
     }
-
-    if (sync)
-        ::fsync(fd);
 }
 
-void write_buffer_to_file(Buffer& buffer, StringView filename, bool force, bool sync)
+int open_temp_file(StringView filename, char (&buffer)[PATH_MAX])
 {
-    struct stat st;
-    auto zfilename = filename.zstr();
+    String path = real_path(filename);
+    auto [dir,file] = split_path(path);
 
-    if (force)
+    if (dir.empty())
+        format_to(buffer, ".{}.kak.XXXXXX", file);
+    else
+        format_to(buffer, "{}/.{}.kak.XXXXXX", dir, file);
+
+    return mkstemp(buffer);
+}
+
+int open_temp_file(StringView filename)
+{
+    char buffer[PATH_MAX];
+    return open_temp_file(filename, buffer);
+}
+
+void write_buffer_to_file(Buffer& buffer, StringView filename,
+                          WriteMethod method, WriteFlags flags)
+{
+    auto zfilename = filename.zstr();
+    struct stat st;
+
+    bool replace = method == WriteMethod::Replace;
+    bool force = flags & WriteFlags::Force;
+
+    if ((replace or force) and ::stat(zfilename, &st) != 0)
     {
-        if (::stat(zfilename, &st) == 0)
-        {
-            if (::chmod(zfilename, st.st_mode | S_IWUSR) < 0)
-                throw runtime_error("unable to change file permissions");
-        }
-        else
-            force = false;
+        force = false;
+        replace = false;
     }
+
+    if (force and ::chmod(zfilename, st.st_mode | S_IWUSR) < 0)
+        throw runtime_error("unable to change file permissions");
+
     auto restore_mode = on_scope_end([&]{
-        if (force and ::chmod(zfilename, st.st_mode) < 0)
+        if ((force or replace) and ::chmod(zfilename, st.st_mode) < 0)
             throw runtime_error("unable to restore file permissions");
     });
 
-    int fd = open(zfilename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    char temp_filename[PATH_MAX];
+    const int fd = replace ? open_temp_file(filename, temp_filename)
+                           : open(zfilename, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd == -1)
         throw file_access_error(filename, strerror(errno));
 
     {
         auto close_fd = on_scope_end([fd]{ close(fd); });
-        write_buffer_to_fd(buffer, fd, sync);
+        write_buffer_to_fd(buffer, fd);
+        if (flags & WriteFlags::Sync)
+            ::fsync(fd);
     }
+
+    if (replace and rename(temp_filename, zfilename) != 0)
+        throw runtime_error("replacing file failed");
 
     if ((buffer.flags() & Buffer::Flags::File) and
         real_path(filename) == real_path(buffer.name()))
@@ -319,17 +345,7 @@ void write_buffer_to_file(Buffer& buffer, StringView filename, bool force, bool 
 
 void write_buffer_to_backup_file(Buffer& buffer)
 {
-    String path = real_path(buffer.name());
-    StringView dir, file;
-    std::tie(dir,file) = split_path(path);
-
-    char pattern[PATH_MAX];
-    if (dir.empty())
-        format_to(pattern, ".{}.kak.XXXXXX", file);
-    else
-        format_to(pattern, "{}/.{}.kak.XXXXXX", dir, file);
-
-    int fd = mkstemp(pattern);
+    const int fd = open_temp_file(buffer.name());
     if (fd >= 0)
     {
         write_buffer_to_fd(buffer, fd);
@@ -440,8 +456,7 @@ CandidateList complete_filename(StringView prefix, const Regex& ignored_regex,
                                 ByteCount cursor_pos, FilenameFlags flags)
 {
     prefix = prefix.substr(0, cursor_pos);
-    StringView dirname, fileprefix;
-    std::tie(dirname, fileprefix) = split_path(prefix);
+    auto [dirname, fileprefix] = split_path(prefix);
     auto parsed_dirname = parse_filename(dirname);
 
     const bool check_ignored_regex = not ignored_regex.empty() and
@@ -469,8 +484,7 @@ CandidateList complete_filename(StringView prefix, const Regex& ignored_regex,
 CandidateList complete_command(StringView prefix, ByteCount cursor_pos)
 {
     String real_prefix = parse_filename(prefix.substr(0, cursor_pos));
-    StringView dirname, fileprefix;
-    std::tie(dirname, fileprefix) = split_path(real_prefix);
+    auto [dirname, fileprefix] = split_path(real_prefix);
 
     if (not dirname.empty())
     {

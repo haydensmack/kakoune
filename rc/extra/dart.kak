@@ -90,19 +90,17 @@ define-command -hidden dart-indent-on-closing-curly-brace %[
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group dart-highlight global WinSetOption filetype=dart %{ add-highlighter window/dart ref dart }
+hook -group dart-highlight global WinSetOption filetype=dart %{
+    add-highlighter window/dart ref dart
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/dart }
+}
 
 hook global WinSetOption filetype=dart %{
     # cleanup trailing whitespaces when exiting insert mode
-    hook window ModeChange insert:.* -group dart-hooks %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
+    hook window ModeChange insert:.* -group dart-trim-indent %{ try %{ execute-keys -draft <a-x>s^\h+$<ret>d } }
     hook window InsertChar \n -group dart-indent dart-indent-on-new-line
     hook window InsertChar \{ -group dart-indent dart-indent-on-opening-curly-brace
     hook window InsertChar \} -group dart-indent dart-indent-on-closing-curly-brace
-}
 
-hook -group dart-highlight global WinSetOption filetype=(?!dart).* %{ remove-highlighter window/dart }
-
-hook global WinSetOption filetype=(?!dart).* %{
-    remove-hooks window dart-hooks
-    remove-hooks window dart-indent
+    hook -once -always window WinSetOption filetype=.* %{ remove-hooks window dart-.+ }
 }

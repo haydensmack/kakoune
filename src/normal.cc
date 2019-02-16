@@ -489,36 +489,39 @@ void command(Context& context, NormalParams params)
         });
 }
 
-void apply_diff(Buffer& buffer, BufferCoord pos, StringView before, StringView after)
+BufferCoord apply_diff(Buffer& buffer, BufferCoord pos, StringView before, StringView after)
 {
-    // The diff algorithm is O(ND) with N the sum of string len, and D the diff count
-    // do not use it if our data is too big
-    constexpr ByteCount size_limit = 100 * 1024;
-    if (before.length() + after.length() > size_limit)
-    {
-        buffer.erase(pos, buffer.advance(pos, before.length()));
-        buffer.insert(pos, after);
-        return;
-    }
+    const auto lines_before = before | split_after<StringView>('\n') | gather<Vector<StringView>>();
+    const auto lines_after = after | split_after<StringView>('\n') | gather<Vector<StringView>>();
 
-    auto diffs = find_diff(before.begin(), (int)before.length(), after.begin(), (int)after.length());
+    auto diffs = find_diff(lines_before.begin(), (int)lines_before.size(),
+                           lines_after.begin(), (int)lines_after.size());
 
+    auto byte_count = [](auto&& lines, int first, int count) {
+        return std::accumulate(&lines[first], &lines[first+count], 0_byte,
+                               [](ByteCount l, StringView s) { return l + s.length(); });
+    };
+
+    int posA = 0;
     for (auto& diff : diffs)
     {
         switch (diff.mode)
         {
         case Diff::Keep:
-            pos = buffer.advance(pos, diff.len);
+            pos = buffer.advance(pos, byte_count(lines_before, posA, diff.len));
+            posA += diff.len;
             break;
         case Diff::Add:
-            buffer.insert(pos, after.substr(ByteCount{diff.posB}, ByteCount{diff.len}));
-            pos = buffer.advance(pos, diff.len);
+            pos = buffer.insert(pos, {lines_after[diff.posB].begin(),
+                                      lines_after[diff.posB + diff.len - 1].end()});
             break;
         case Diff::Remove:
-            buffer.erase(pos, buffer.advance(pos, diff.len));
+            pos = buffer.erase(pos, buffer.advance(pos, byte_count(lines_before, posA, diff.len)));
+            posA += diff.len;
             break;
         }
     }
+    return pos;
 }
 
 template<bool replace>
@@ -544,19 +547,14 @@ void pipe(Context& context, NormalParams)
 
             Buffer& buffer = context.buffer();
             SelectionList selections = context.selections();
-            auto restore_sels = on_scope_end([&, old_main = selections.main_index()] {
-                selections.set_main_index(old_main);
-                context.selections() = std::move(selections);
-            });
             if (replace)
             {
                 ScopedEdition edition(context);
                 ForwardChangesTracker changes_tracker;
                 size_t timestamp = buffer.timestamp();
-                for (int i = 0; i < selections.size(); ++i)
+                Vector<Selection> new_sels;
+                for (auto& sel : selections)
                 {
-                    selections.set_main_index(i);
-                    auto& sel = selections.main();
                     const auto beg = changes_tracker.get_new_coord_tolerant(sel.min());
                     const auto end = changes_tracker.get_new_coord_tolerant(sel.max());
 
@@ -566,7 +564,7 @@ void pipe(Context& context, NormalParams)
                         in += '\n';
 
                     // Needed in case we read selections inside the cmdline
-                    context.selections_write_only() = selections;
+                    context.selections_write_only().set({keep_direction(Selection{beg, end}, sel)}, 0);
 
                     String out = ShellManager::instance().eval(
                         cmdline, context, in,
@@ -578,13 +576,23 @@ void pipe(Context& context, NormalParams)
                         if (not out.empty() and out.back() == '\n')
                             out.resize(out.length()-1, 0);
                     }
-                    apply_diff(buffer, beg, in, out);
+                    auto new_end = apply_diff(buffer, beg, in, out);
+                    if (new_end != beg)
+                        new_sels.push_back(keep_direction({beg, buffer.char_prev(new_end), std::move(sel.captures())}, sel));
+                    else
+                    {
+                        if (new_end != BufferCoord{})
+                            new_end = buffer.char_prev(new_end);
+                        new_sels.push_back({new_end, new_end, std::move(sel.captures())});
+                    }
 
                     changes_tracker.update(buffer, timestamp);
                 }
+                context.selections_write_only().set(std::move(new_sels), selections.main_index());
             }
             else
             {
+                const auto old_main = selections.main_index();
                 for (int i = 0; i < selections.size(); ++i)
                 {
                     selections.set_main_index(i);
@@ -592,6 +600,7 @@ void pipe(Context& context, NormalParams)
                                                   content(buffer, selections.main()),
                                                   ShellManager::Flags::None);
                 }
+                selections.set_main_index(old_main);
             }
         });
 }
@@ -723,15 +732,16 @@ void paste_all(Context& context, NormalParams params)
         selections = std::move(result);
 }
 
-constexpr RegexCompileFlags direction_flags(MatchDirection direction)
+constexpr RegexCompileFlags direction_flags(RegexMode mode)
 {
-    return (direction == MatchDirection::Forward) ?
+    return (mode & RegexMode::Forward) ?
         RegexCompileFlags::None : RegexCompileFlags::Backward | RegexCompileFlags::NoForward;
 }
 
-template<MatchDirection direction = MatchDirection::Forward, typename T>
+template<RegexMode mode = RegexMode::Forward, typename T>
 void regex_prompt(Context& context, String prompt, String default_regex, T func)
 {
+    static_assert(is_direction(mode));
     DisplayCoord position = context.has_window() ? context.window().position() : DisplayCoord{};
     SelectionList selections = context.selections();
     context.input_handler().prompt(
@@ -785,7 +795,7 @@ void regex_prompt(Context& context, String prompt, String default_regex, T func)
                     context.push_jump();
 
                 if (not str.empty() or event == PromptEvent::Validate)
-                    func(Regex{str.empty() ? default_regex : str, direction_flags(direction)}, event, context);
+                    func(Regex{str.empty() ? default_regex : str, direction_flags(mode)}, event, context);
             }
             catch (regex_error& err)
             {
@@ -805,19 +815,19 @@ void regex_prompt(Context& context, String prompt, String default_regex, T func)
         });
 }
 
-template<MatchDirection direction>
+template<RegexMode mode>
 void select_next_matches(Context& context, const Regex& regex, int count)
 {
      auto& selections = context.selections();
      do {
          bool wrapped = false;
          for (auto& sel : selections)
-             sel = keep_direction(find_next_match<direction>(context, sel, regex, wrapped), sel);
+             sel = keep_direction(find_next_match<mode>(context, sel, regex, wrapped), sel);
          selections.sort_and_merge_overlapping();
      } while (--count > 0);
 }
 
-template<MatchDirection direction>
+template<RegexMode mode>
 void extend_to_next_matches(Context& context, const Regex& regex, int count)
 {
      Vector<Selection> new_sels;
@@ -827,7 +837,7 @@ void extend_to_next_matches(Context& context, const Regex& regex, int count)
          size_t main_index = selections.main_index();
          for (auto& sel : selections)
          {
-             auto new_sel = find_next_match<direction>(context, sel, regex, wrapped);
+             auto new_sel = find_next_match<mode>(context, sel, regex, wrapped);
              if (not wrapped)
              {
                  new_sels.push_back(sel);
@@ -844,12 +854,13 @@ void extend_to_next_matches(Context& context, const Regex& regex, int count)
      } while (--count > 0);
 }
 
-template<SelectMode mode, MatchDirection direction>
+template<SelectMode mode, RegexMode regex_mode>
 void search(Context& context, NormalParams params)
 {
+    static_assert(is_direction(regex_mode));
     constexpr StringView prompt = mode == SelectMode::Extend ?
-        (direction == MatchDirection::Forward ? "search (extend):" : "reverse search (extend):")
-      : (direction == MatchDirection::Forward ? "search:"          : "reverse search:");
+        (regex_mode & RegexMode::Forward ? "search (extend):" : "reverse search (extend):")
+      : (regex_mode & RegexMode::Forward ? "search:"          : "reverse search:");
 
     const char reg = to_lower(params.reg ? params.reg : '/');
     const int count = params.count;
@@ -858,7 +869,7 @@ void search(Context& context, NormalParams params)
     Vector<String> saved_reg{reg_content.begin(), reg_content.end()};
     const int main_index = std::min(context.selections().main_index(), saved_reg.size()-1);
 
-    regex_prompt<direction>(context, prompt.str(), saved_reg[main_index],
+    regex_prompt<regex_mode>(context, prompt.str(), saved_reg[main_index],
                  [reg, count, saved_reg]
                  (const Regex& regex, PromptEvent event, Context& context) {
                      if (event == PromptEvent::Abort)
@@ -872,20 +883,20 @@ void search(Context& context, NormalParams params)
                          return;
 
                      if (mode == SelectMode::Extend)
-                         extend_to_next_matches<direction>(context, regex, count);
+                         extend_to_next_matches<regex_mode>(context, regex, count);
                      else
-                         select_next_matches<direction>(context, regex, count);
+                         select_next_matches<regex_mode>(context, regex, count);
                  });
 }
 
-template<SelectMode mode, MatchDirection direction>
+template<SelectMode mode, RegexMode regex_mode>
 void search_next(Context& context, NormalParams params)
 {
     const char reg = to_lower(params.reg ? params.reg : '/');
     StringView str = context.main_sel_register_value(reg);
     if (not str.empty())
     {
-        Regex regex{str, direction_flags(direction)};
+        Regex regex{str, direction_flags(regex_mode)};
         auto& selections = context.selections();
         bool main_wrapped = false;
         do {
@@ -893,12 +904,12 @@ void search_next(Context& context, NormalParams params)
             if (mode == SelectMode::Replace)
             {
                 auto& sel = selections.main();
-                sel = keep_direction(find_next_match<direction>(context, sel, regex, wrapped), sel);
+                sel = keep_direction(find_next_match<regex_mode>(context, sel, regex, wrapped), sel);
             }
             else if (mode == SelectMode::Append)
             {
                 auto sel = keep_direction(
-                    find_next_match<direction>(context, selections.main(), regex, wrapped),
+                    find_next_match<regex_mode>(context, selections.main(), regex, wrapped),
                     selections.main());
                 selections.push_back(std::move(sel));
                 selections.set_main_index(selections.size() - 1);
@@ -962,8 +973,10 @@ void select_regex(Context& context, NormalParams params)
 
         RegisterManager::instance()[reg].set(context, ex.str());
 
+        auto& selections = context.selections();
+        auto& buffer = selections.buffer();
         if (not ex.empty() and not ex.str().empty())
-            select_all_matches(context.selections(), ex, capture);
+            selections = SelectionList{buffer, select_matches(buffer, selections, ex, capture)};
     });
 }
 
@@ -987,8 +1000,10 @@ void split_regex(Context& context, NormalParams params)
 
         RegisterManager::instance()[reg].set(context, ex.str());
 
+        auto& selections = context.selections();
+        auto& buffer = selections.buffer();
         if (not ex.empty() and not ex.str().empty())
-            split_selections(context.selections(), ex, capture);
+            selections = SelectionList{buffer, split_on_matches(buffer, selections, ex, capture)};
     });
 }
 
@@ -1101,8 +1116,7 @@ void keep(Context& context, NormalParams params)
             // give more intuitive behaviours in keep use cases.
             const auto flags = match_flags(is_bol(begin.coord()), false,
                                            is_bow(buffer, begin.coord()),
-                                           is_eow(buffer, end.coord())) |
-                               RegexExecFlags::AnyMatch;
+                                           is_eow(buffer, end.coord()));
             if (regex_search(begin, end, begin, end, regex, flags) == matching)
                 keep.push_back(sel);
         }
@@ -1207,7 +1221,7 @@ void deindent(Context& context, NormalParams params)
                         sels.emplace_back(line, BufferCoord{line, column-1});
                     break;
                 }
-                if (width == indent_width)
+                if (width >= indent_width)
                 {
                     sels.emplace_back(line, BufferCoord{line, column});
                     break;
@@ -1327,7 +1341,7 @@ void select_object(Context& context, NormalParams params)
             return;
 
         const Codepoint cp = *key.codepoint();
-        if (is_punctuation(cp) or cp == '_')
+        if (is_punctuation(cp, {}))
         {
             auto re = Regex{"\\Q" + to_string(cp), RegexCompileFlags::Backward};
             return select_and_set_last<mode>(
@@ -1469,10 +1483,10 @@ template<SelectFlags flags>
 void select_to_next_char(Context& context, NormalParams params)
 {
     auto get_title = [] {
-        return format("{}{} {} next char",
-                      flags & SelectFlags::Reverse ? "reverse " : "",
+        return format("{} {} {} char",
                       flags & SelectFlags::Extend ? "extend" : "select",
-                      flags & SelectFlags::Inclusive ? "onto" : "to");
+                      flags & SelectFlags::Inclusive ? "onto" : "to",
+                      flags & SelectFlags::Reverse ? "previous" : "next");
     };
 
     on_next_key_with_autoinfo(context, KeymapMode::None,
@@ -1711,17 +1725,32 @@ void spaces_to_tabs(Context& context, NormalParams params)
 void trim_selections(Context& context, NormalParams)
 {
     auto& buffer = context.buffer();
-    for (auto& sel : context.selections())
+    auto& selections = context.selections();
+    Vector<int> to_remove;
+
+    for (int i = 0; i < (int)selections.size(); ++i)
     {
+        auto& sel = selections[i];
         auto beg = buffer.iterator_at(sel.min());
         auto end = buffer.iterator_at(sel.max());
         while (beg != end and is_blank(*beg))
             ++beg;
         while (beg != end and is_blank(*end))
             --end;
-        sel.min() = beg.coord();
-        sel.max() = end.coord();
+
+        if (beg == end and is_blank(*beg))
+            to_remove.push_back(i);
+        else
+        {
+            sel.min() = beg.coord();
+            sel.max() = end.coord();
+        }
     }
+
+    if (to_remove.size() == selections.size())
+        throw runtime_error{"no selections remaining"};
+    for (auto& i : to_remove | reverse())
+        selections.remove(i);
 }
 
 SelectionList read_selections_from_register(char reg, Context& context)
@@ -2032,7 +2061,8 @@ void move_cursor(Context& context, NormalParams params)
 
 void select_whole_buffer(Context& context, NormalParams)
 {
-    select_buffer(context.selections());
+    auto& buffer = context.buffer();
+    context.selections_write_only() = SelectionList{buffer, {{0,0}, {buffer.back_coord(), max_column}}};
 }
 
 void keep_selection(Context& context, NormalParams p)
@@ -2185,7 +2215,7 @@ static const HashMap<Key, NormalCmd, MemoryDomain::Undefined, KeymapBackend> key
     { {';'}, {"reduce selections to their cursor", clear_selections} },
     { {alt(';')}, {"swap selections cursor and anchor", flip_selections} },
     { {alt(':')}, {"ensure selection cursor is after anchor", ensure_forward} },
-    { {alt('m')}, {"merge consecutive selections", merge_consecutive} },
+    { {alt('_')}, {"merge consecutive selections", merge_consecutive} },
 
     { {'w'}, {"select to next word start", repeated<&select<SelectMode::Replace, select_to_next_word<Word>>>} },
     { {'e'}, {"select to next word end", repeated<select<SelectMode::Replace, select_to_next_word_end<Word>>>} },
@@ -2215,17 +2245,19 @@ static const HashMap<Key, NormalCmd, MemoryDomain::Undefined, KeymapBackend> key
     { {alt('x')}, {"extend selections to whole lines", select<SelectMode::Replace, select_lines>} },
     { {alt('X')}, {"crop selections to whole lines", select<SelectMode::Replace, trim_partial_lines>} },
 
-    { {'m'}, {"select to matching character", select<SelectMode::Replace, select_matching>} },
-    { {'M'}, {"extend to matching character", select<SelectMode::Extend, select_matching>} },
+    { {'m'}, {"select to matching character", select<SelectMode::Replace, select_matching<true>>} },
+    { {alt('m')}, {"backward select to matching character", select<SelectMode::Replace, select_matching<false>>} },
+    { {'M'}, {"extend to matching character", select<SelectMode::Extend, select_matching<true>>} },
+    { {alt('M')}, {"backward extend to matching character", select<SelectMode::Extend, select_matching<false>>} },
 
-    { {'/'}, {"select next given regex match", search<SelectMode::Replace, MatchDirection::Forward>} },
-    { {'?'}, {"extend with next given regex match", search<SelectMode::Extend, MatchDirection::Forward>} },
-    { {alt('/')}, {"select previous given regex match", search<SelectMode::Replace, MatchDirection::Backward>} },
-    { {alt('?')}, {"extend with previous given regex match", search<SelectMode::Extend, MatchDirection::Backward>} },
-    { {'n'}, {"select next current search pattern match", search_next<SelectMode::Replace, MatchDirection::Forward>} },
-    { {'N'}, {"extend with next current search pattern match", search_next<SelectMode::Append, MatchDirection::Forward>} },
-    { {alt('n')}, {"select previous current search pattern match", search_next<SelectMode::Replace, MatchDirection::Backward>} },
-    { {alt('N')}, {"extend with previous current search pattern match", search_next<SelectMode::Append, MatchDirection::Backward>} },
+    { {'/'}, {"select next given regex match", search<SelectMode::Replace, RegexMode::Forward>} },
+    { {'?'}, {"extend with next given regex match", search<SelectMode::Extend, RegexMode::Forward>} },
+    { {alt('/')}, {"select previous given regex match", search<SelectMode::Replace, RegexMode::Backward>} },
+    { {alt('?')}, {"extend with previous given regex match", search<SelectMode::Extend, RegexMode::Backward>} },
+    { {'n'}, {"select next current search pattern match", search_next<SelectMode::Replace, RegexMode::Forward>} },
+    { {'N'}, {"extend with next current search pattern match", search_next<SelectMode::Append, RegexMode::Forward>} },
+    { {alt('n')}, {"select previous current search pattern match", search_next<SelectMode::Replace, RegexMode::Backward>} },
+    { {alt('N')}, {"extend with previous current search pattern match", search_next<SelectMode::Append, RegexMode::Backward>} },
     { {'*'}, {"set search pattern to main selection content", use_selection_as_search_pattern<true>} },
     { {alt('*')}, {"set search pattern to main selection content, do not detect words", use_selection_as_search_pattern<false>} },
 

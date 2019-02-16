@@ -5,7 +5,6 @@
 #include <utility>
 #include <iterator>
 #include <numeric>
-#include <functional>
 
 #include "constexpr_utils.hh"
 
@@ -191,13 +190,34 @@ inline auto transform(Transform t)
     });
 }
 
+template<typename T, typename U, typename = void>
+struct is_pointer_like : std::false_type {};
+
+template<typename T, typename U>
+struct is_pointer_like<T, U, std::enable_if_t<std::is_same_v<std::decay_t<decltype(*std::declval<U>())>, std::decay_t<T>>>> : std::true_type {};
+
 template<typename M, typename T>
-inline auto transform(M T::*m)
+inline auto transform(M T::*member)
 {
-    return transform(std::mem_fn(std::forward<decltype(m)>(m)));
+    return transform([member](auto&& arg) -> decltype(auto) {
+        using Arg = decltype(arg);
+        using Member = decltype(member);
+
+        auto get_object = [&] () mutable  -> decltype(auto) {
+            if constexpr (is_pointer_like<T, Arg>::value)
+                return *std::forward<Arg>(arg);
+            else
+                return std::forward<Arg>(arg);
+        };
+
+        if constexpr (std::is_member_function_pointer_v<Member>)
+            return (get_object().*member)();
+        else
+            return get_object().*member;
+    });
 }
 
-template<typename Range, bool escape = false,
+template<typename Range, bool escape, bool include_separator,
          typename Element = ValueOf<Range>,
          typename ValueTypeParam = void>
 struct SplitView
@@ -226,7 +246,7 @@ struct SplitView
         bool operator==(const Iterator& other) const { return pos == other.pos and done == other.done; }
         bool operator!=(const Iterator& other) const { return pos != other.pos or done != other.done; }
 
-        ValueType operator*() { return {pos, sep}; }
+        ValueType operator*() { return {pos, (not include_separator or sep == end) ? sep : sep + 1}; }
 
     private:
         void advance()
@@ -239,6 +259,11 @@ struct SplitView
             }
 
             pos = sep+1;
+            if (include_separator and pos == end)
+            {
+                done = true;
+                return;
+            }
             bool escaped = escape and *sep == escaper;
             for (sep = pos; sep != end; ++sep)
             {
@@ -269,7 +294,16 @@ auto split(Element separator)
 {
     return make_view_factory([s = std::move(separator)](auto&& range) {
         using Range = decltype(range);
-        return SplitView<decay_range<Range>, false, Element, ValueType>{std::forward<Range>(range), std::move(s), {}};
+        return SplitView<decay_range<Range>, false, false, Element, ValueType>{std::forward<Range>(range), std::move(s), {}};
+    });
+}
+
+template<typename ValueType = void, typename Element>
+auto split_after(Element separator)
+{
+    return make_view_factory([s = std::move(separator)](auto&& range) {
+        using Range = decltype(range);
+        return SplitView<decay_range<Range>, false, true, Element, ValueType>{std::forward<Range>(range), std::move(s), {}};
     });
 }
 
@@ -278,7 +312,7 @@ auto split(Element separator, Element escaper)
 {
     return make_view_factory([s = std::move(separator), e = std::move(escaper)](auto&& range) {
         using Range = decltype(range);
-        return SplitView<decay_range<Range>, true, Element, ValueType>{std::forward<Range>(range), std::move(s), std::move(e)};
+        return SplitView<decay_range<Range>, true, false, Element, ValueType>{std::forward<Range>(range), std::move(s), std::move(e)};
     });
 }
 

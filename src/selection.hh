@@ -8,6 +8,8 @@ namespace Kakoune
 
 using CaptureList = Vector<String, MemoryDomain::Selections>;
 
+constexpr ColumnCount max_column{std::numeric_limits<int>::max()};
+
 // A selection is a Selection, associated with a CaptureList
 struct Selection
 {
@@ -15,7 +17,7 @@ struct Selection
 
     Selection() = default;
     Selection(BufferCoord pos) : Selection(pos,pos) {}
-    Selection(BufferCoord anchor, BufferCoord cursor,
+    Selection(BufferCoord anchor, BufferCoordAndTarget cursor,
               CaptureList captures = {})
         : m_anchor{anchor}, m_cursor{cursor},
           m_captures(std::move(captures)) {}
@@ -65,6 +67,7 @@ inline bool overlaps(const Selection& lhs, const Selection& rhs)
 void update_selections(Vector<Selection>& selections, size_t& main,
                        Buffer& buffer, size_t timestamp);
 
+bool compare_selections(const Selection& lhs, const Selection& rhs);
 void sort_selections(Vector<Selection>& selections, size_t& main);
 void merge_overlapping_selections(Vector<Selection>& selections, size_t& main);
 void clamp_selections(Vector<Selection>& sel, const Buffer& buffer);
@@ -127,6 +130,7 @@ struct SelectionList
 
     void remove(size_t index);
 
+    const Selection* data() const { return m_selections.data(); }
     size_t size() const { return m_selections.size(); }
 
     bool operator==(const SelectionList& other) const { return m_buffer == other.m_buffer and m_selections == other.m_selections; }
@@ -140,6 +144,7 @@ struct SelectionList
     Buffer& buffer() const { return *m_buffer; }
 
     size_t timestamp() const { return m_timestamp; }
+    void force_timestamp(size_t timestamp) { m_timestamp = timestamp; }
 
     void insert(ConstArrayView<String> strings, InsertMode mode,
                 Vector<BufferCoord>* out_insert_pos = nullptr);

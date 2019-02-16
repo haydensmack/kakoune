@@ -504,7 +504,7 @@ void NCursesUI::check_resize(bool force)
     m_window = (NCursesWin*)newpad(ws.ws_row, ws.ws_col);
     kak_assert(m_window);
     intrflush(m_window, false);
-    keypad(m_window, true);
+    keypad(m_window, not m_builtin_key_parser);
     meta(m_window, true);
 
     m_dimensions = DisplayCoord{ws.ws_row-1, ws.ws_col};
@@ -548,6 +548,9 @@ Optional<Key> NCursesUI::get_next_key()
     const int c = wgetch(m_window);
     wtimeout(m_window, -1);
 
+    if (c == ERR)
+        return {};
+
     if (c == KEY_MOUSE)
     {
         MEVENT ev;
@@ -562,9 +565,13 @@ Optional<Key> NCursesUI::get_next_key()
                     res |= Key::Modifiers::Alt;
 
                 if (BUTTON_PRESS(mask, 1))
-                    return res | Key::Modifiers::MousePress;
+                    return res | Key::Modifiers::MousePressLeft;
+                if (BUTTON_PRESS(mask, 3))
+                    return res | Key::Modifiers::MousePressRight;
                 if (BUTTON_RELEASE(mask, 1))
-                    return res | Key::Modifiers::MouseRelease;
+                    return res | Key::Modifiers::MouseReleaseLeft;
+                if (BUTTON_RELEASE(mask, 3))
+                    return res | Key::Modifiers::MouseReleaseRight;
                 if (BUTTON_PRESS(mask, m_wheel_down_button))
                     return res | Key::Modifiers::MouseWheelDown;
                 if (BUTTON_PRESS(mask, m_wheel_up_button))
@@ -578,9 +585,6 @@ Optional<Key> NCursesUI::get_next_key()
     }
 
     auto parse_key = [this](int c) -> Optional<Key> {
-        if (c == ERR)
-            return {};
-
         switch (c)
         {
         case KEY_BACKSPACE: case 127: return {Key::Backspace};
@@ -655,19 +659,61 @@ Optional<Key> NCursesUI::get_next_key()
         return {};
     };
 
+    constexpr auto direction = make_array({Key::Up, Key::Down, Key::Right, Key::Left, Key::Home, Key::End});
+    auto parse_csi = [this, &direction]() -> Optional<Key> {
+        const Codepoint c1 = wgetch(m_window);
+        if (c1 >= 'A' and c1 <= 'F')
+            return Key{direction[c1 - 'A']};
+        if (c1 == '1')
+        {
+            const Codepoint c2 = wgetch(m_window);
+            if (c2 >= 'A' and c2 <= 'F')
+                return Key{direction[c2 - 'A']};
+            if (c2 != ';')
+            {
+                ungetch(c2); ungetch(c1);
+                return {};
+            }
+            const Codepoint c3 = wgetch(m_window);
+            if (c3 < '2' or c3 > '8')
+            {
+                ungetch(c3); ungetch(c2); ungetch(c1);
+                return {};
+            }
+            const Codepoint c4 = wgetch(m_window);
+            if (c4 < 'A' or c4 > 'F')
+            {
+                ungetch(c4); ungetch(c3); ungetch(c2); ungetch(c1);
+                return {};
+            }
+
+            Key::Modifiers modifiers = Key::Modifiers::None;
+            const auto mask = c3 - '1';
+            if (mask & 1)
+                modifiers |= Key::Modifiers::Shift;
+            if (mask & 2)
+                modifiers |= Key::Modifiers::Alt;
+            if (mask & 4)
+                modifiers |= Key::Modifiers::Control;
+            return Key{modifiers, direction[c4 - 'A']};
+        }
+        if (c1 == 'I')
+            return {Key::FocusIn};
+        if (c1 == 'O')
+            return {Key::FocusOut};
+
+        ungetch(c1);
+        return {};
+    };
+
     if (c == 27)
     {
         wtimeout(m_window, 0);
         const int new_c = wgetch(m_window);
         if (new_c == '[') // potential CSI
         {
-            const Codepoint csi_val = wgetch(m_window);
-            switch (csi_val)
-            {
-                case 'I': return {Key::FocusIn};
-                case 'O': return {Key::FocusOut};
-                default: break; // nothing
-            }
+            if (auto key = parse_csi())
+                return key;
         }
         wtimeout(m_window, -1);
 
@@ -676,6 +722,7 @@ Optional<Key> NCursesUI::get_next_key()
         else
             return {Key::Escape};
     }
+
     return parse_key(c);
 }
 
@@ -740,17 +787,20 @@ void NCursesUI::draw_menu()
 
     const LineCount mark_height = min(div_round_up(sq(win_height), menu_lines),
                                       win_height);
-    const LineCount top_line = m_menu.first_item / m_menu.columns;
-    const LineCount mark_line = (win_height - mark_height) * top_line / max(1_line, menu_lines - win_height);
+
+    const int menu_cols = div_round_up(item_count, (int)m_menu.size.line);
+    const int first_col = m_menu.first_item / (int)m_menu.size.line;
+
+    const LineCount mark_line = (win_height - mark_height) * first_col / max(1, menu_cols - m_menu.columns);
+
     for (auto line = 0_line; line < win_height; ++line)
     {
         wmove(m_menu.win, (int)line, 0);
         for (int col = 0; col < m_menu.columns; ++col)
         {
-            const int item_idx = (int)(top_line + line) * m_menu.columns
-                                 + col;
+            int item_idx = (first_col + col) * (int)m_menu.size.line + (int)line;
             if (item_idx >= item_count)
-                break;
+                continue;
 
             const DisplayLine& item = m_menu.items[item_idx];
             draw_line(m_menu.win, item, 0, column_width,
@@ -883,15 +933,13 @@ void NCursesUI::menu_select(int selected)
     else
     {
         m_menu.selected_item = selected;
-        const LineCount win_height = m_menu.size.line;
-        const LineCount top_line = m_menu.first_item / m_menu.columns;
-        const LineCount menu_lines = div_round_up(item_count, m_menu.columns);
-        const LineCount selected_line = m_menu.selected_item / m_menu.columns;
-        kak_assert(menu_lines >= win_height);
-        if (selected_line < top_line)
-            m_menu.first_item = (int)selected_line * m_menu.columns;
-        if (selected_line >= top_line + win_height)
-            m_menu.first_item = (int)min(selected_line, menu_lines - win_height) * m_menu.columns;
+        const int menu_cols = div_round_up(item_count, (int)m_menu.size.line);
+        const int first_col = m_menu.first_item / (int)m_menu.size.line;
+        const int selected_col = m_menu.selected_item / (int)m_menu.size.line;
+        if (selected_col < first_col)
+            m_menu.first_item = selected_col * (int)m_menu.size.line;
+        if (selected_col >= first_col + m_menu.columns)
+            m_menu.first_item = min(selected_col, menu_cols - m_menu.columns) * (int)m_menu.size.line;
     }
     draw_menu();
 }
@@ -1228,6 +1276,14 @@ void NCursesUI::set_ui_options(const Options& options)
         auto wheel_down_it = options.find("ncurses_wheel_down_button"_sv);
         m_wheel_down_button = wheel_down_it != options.end() ?
             str_to_int_ifp(wheel_down_it->value).value_or(5) : 5;
+    }
+
+    {
+        auto builtin_key_parser_it = options.find("ncurses_builtin_key_parser"_sv);
+        m_builtin_key_parser = builtin_key_parser_it != options.end() and
+                               (builtin_key_parser_it->value == "yes" or
+                                builtin_key_parser_it->value == "true");
+        keypad(m_window, not m_builtin_key_parser);
     }
 }
 

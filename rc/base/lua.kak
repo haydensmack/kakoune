@@ -13,11 +13,11 @@ hook global BufCreate .*[.](lua) %{
 
 add-highlighter shared/lua regions
 add-highlighter shared/lua/code default-region group
+add-highlighter shared/lua/raw_string  region -match-capture '\[(=*)\['   '\](=*)\]'       fill string
+add-highlighter shared/lua/raw_comment region -match-capture '--\[(=*)\[' '\](=*)\]'       fill comment
 add-highlighter shared/lua/double_string region '"'   (?<!\\)(?:\\\\)*" fill string
 add-highlighter shared/lua/single_string region "'"   (?<!\\)(?:\\\\)*' fill string
 add-highlighter shared/lua/comment       region '--'  $                 fill comment
-add-highlighter shared/lua/raw_string  region -match-capture '\[(=*)\['   '\](=*)\]'       fill string
-add-highlighter shared/lua/raw_comment region -match-capture '--\[(=*)\[' '\](=*)\]'       fill comment
 
 add-highlighter shared/lua/code/ regex \b(and|break|do|else|elseif|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while)\b 0:keyword
 
@@ -84,7 +84,10 @@ define-command -hidden lua-insert-on-new-line %[
 # Initialization
 # ‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-hook -group lua-highlight global WinSetOption filetype=lua %{ add-highlighter window/lua ref lua }
+hook -group lua-highlight global WinSetOption filetype=lua %{
+    add-highlighter window/lua ref lua
+    hook -once -always window WinSetOption filetype=.* %{ remove-highlighter window/lua }
+}
 
 hook global WinSetOption filetype=lua %{
     hook window InsertChar .* -group lua-indent lua-indent-on-char
@@ -92,13 +95,9 @@ hook global WinSetOption filetype=lua %{
     hook window InsertChar \n -group lua-insert lua-insert-on-new-line
 
     alias window alt lua-alternative-file
-}
 
-hook -group lua-highlight global WinSetOption filetype=(?!lua).* %{ remove-highlighter window/lua }
-
-hook global WinSetOption filetype=(?!lua).* %{
-    remove-hooks window lua-indent
-    remove-hooks window lua-insert
-
-    unalias window alt lua-alternative-file
+    hook -once -always window WinSetOption filetype=.* %{
+        remove-hooks window lua-.+
+        unalias window alt lua-alternative-file
+    }
 }
